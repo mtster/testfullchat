@@ -1,100 +1,116 @@
 // src/components/ChatView.js
-import { rtdb } from "../firebase";
 import React, { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthProvider";
+import { rtdb } from "../firebase";
 import { ref, onValue, push, set, get } from "firebase/database";
+import "../index.css";
 
+/* same message path heuristics you had before */
 const POSSIBLE_MESSAGE_PATHS = [
   (chatId) => `messages/${chatId}`,
   (chatId) => `chatMessages/${chatId}`,
   (chatId) => `chats/${chatId}/messages`,
   (chatId) => `messagesByChat/${chatId}`,
-  (chatId) => `chats/${chatId}/messagesById`
+  (chatId) => `chats/${chatId}/messagesById`,
 ];
 
 export default function ChatView() {
   const { chatId } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+
   const [messages, setMessages] = useState([]);
   const [chat, setChat] = useState(null);
   const [text, setText] = useState("");
+  const [messagesPath, setMessagesPath] = useState(null);
+  const [error, setError] = useState(null);
   const listRef = useRef(null);
-
-  // use the already-initialized rtdb instance
-  const rdb = rtdb;
 
   useEffect(() => {
     if (!chatId || !user) return;
-    let activeUnsub = null;
-    // try different possible message paths
-    async function findMessagesPath() {
-      for (const pFn of POSSIBLE_MESSAGE_PATHS) {
-        const p = pFn(chatId);
-        const snap = await get(ref(rdb, p));
-        if (snap && snap.exists()) {
-          return p;
+    let unsubMessages = null;
+    let unsubChat = null;
+    let mounted = true;
+
+    async function findAndSubscribe() {
+      try {
+        const chatRef = ref(rtdb, `chats/${chatId}`);
+        unsubChat = onValue(chatRef, (snap) => {
+          if (!snap || !snap.exists()) {
+            setChat(null);
+            navigate("/", { replace: true });
+            return;
+          }
+          if (mounted) setChat({ id: chatId, ...(snap.val() || {}) });
+        });
+
+        // find a message path that exists
+        let found = null;
+        for (const fn of POSSIBLE_MESSAGE_PATHS) {
+          const candidate = fn(chatId);
+          const snap = await get(ref(rtdb, candidate));
+          if (snap && snap.exists()) {
+            found = candidate;
+            break;
+          }
         }
+        if (!found) found = `messages/${chatId}`;
+        if (!mounted) return;
+        setMessagesPath(found);
+
+        unsubMessages = onValue(ref(rtdb, found), (snap) => {
+          const val = snap.val() || {};
+          const arr = Object.entries(val).map(([id, v]) => ({ id, ...(v || {}) }));
+          arr.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+          setMessages(arr);
+          setTimeout(() => {
+            if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+          }, 70);
+        }, (listenErr) => {
+          console.error("failed to attach message listener", listenErr);
+          setError("Failed to subscribe to messages");
+        });
+      } catch (err) {
+        console.error("ChatView setup error", err);
+        setError("Unable to load chat");
       }
-      // fallback to messages/chatId
-      return `messages/${chatId}`;
     }
 
-    let mounted = true;
-    (async () => {
-      const chatRef = ref(rdb, `chats/${chatId}`);
-      const chatSnap = await get(chatRef);
-      if (!chatSnap || !chatSnap.exists()) {
-        if (mounted) {
-          setChat(null);
-          navigate("/");
-        }
-        return;
-      }
-      setChat({ id: chatId, ...chatSnap.val() });
-
-      const messagesRefPath = await findMessagesPath();
-      // subscribe
-      activeUnsub = onValue(ref(rdb, messagesRefPath), (mSnap) => {
-        const val = mSnap.val() || {};
-        // convert to array
-        const arr = Object.entries(val).map(([id, v]) => ({ id, ...v }));
-        // sort by timestamp if present
-        arr.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-        setMessages(arr);
-        // scroll to bottom
-        setTimeout(() => {
-          if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
-        }, 50);
-      });
-    })();
+    findAndSubscribe();
 
     return () => {
       mounted = false;
-      if (activeUnsub) activeUnsub();
+      try { if (typeof unsubMessages === "function") unsubMessages(); } catch(_) {}
+      try { if (typeof unsubChat === "function") unsubChat(); } catch(_) {}
     };
-  }, [chatId, user, rdb, navigate]);
+  }, [chatId, user, navigate]);
 
   async function sendMessage(e) {
-    e && e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
+    setError(null);
     if (!text || !text.trim() || !chatId || !user) return;
     const txt = text.trim();
     setText("");
     try {
-      // choose path used earlier; simplest: push to messages/<chatId>
-      const messagesRefPath = `messages/${chatId}`;
-      const newMsgRef = push(ref(rdb, messagesRefPath));
-      await set(newMsgRef, {
+      const pathToUse = messagesPath || `messages/${chatId}`;
+      const newRef = push(ref(rtdb, pathToUse));
+      await set(newRef, {
         senderId: user.id,
+        senderUsername: user.username || null,
         message: txt,
         timestamp: Date.now(),
       });
-      // update some chat meta if you have lastMessage fields
-      await set(ref(rdb, `chats/${chatId}/lastMessage`), txt).catch(()=>{});
-      await set(ref(rdb, `chats/${chatId}/lastMessageAt`), Date.now()).catch(()=>{});
+      // update chat metadata
+      try {
+        await set(ref(rtdb, `chats/${chatId}/lastMessage`), txt);
+        await set(ref(rtdb, `chats/${chatId}/lastMessageAt`), Date.now());
+      } catch (metaErr) {
+        console.warn("Failed to update chat metadata", metaErr);
+      }
     } catch (err) {
-      console.error("sendMessage error", err);
+      console.error("sendMessage error:", err);
+      setError("Failed to send message");
     }
   }
 
@@ -102,27 +118,56 @@ export default function ChatView() {
   if (!chat) return <div style={{ padding: 12 }}>Select a chat</div>;
 
   return (
-    <div style={{ padding: 12 }}>
-      <div style={{ marginBottom: 8 }}>
-        <strong>{chat.name || `Chat ${chat.id}`}</strong>
+    <div className="chat-view">
+      <div className="chat-header">
+        <button className="chat-back" onClick={() => navigate(-1)} aria-label="Go back">
+          {/* simple back chevron (SVG) */}
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <div style={{ fontWeight: 700 }}>{chat.name || `Chat ${chat.id}`}</div>
+          <div style={{ color: "var(--muted)", fontSize: 13 }}>
+            {chat.participantUsernames ? chat.participantUsernames.join(", ") : ""}
+          </div>
+        </div>
+
+        <div style={{ marginLeft: "auto", color: "var(--muted)" }}>
+          {error && <span style={{ color: "salmon" }}>{error}</span>}
+        </div>
       </div>
 
-      <div ref={listRef} style={{ maxHeight: 400, overflow: "auto", border: "1px solid #eee", padding: 8, marginBottom: 8 }}>
-        {messages.map((m) => {
-          const mine = m.senderId === user.id;
-          return (
-            <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 6 }}>
-              <div style={{ maxWidth: "70%", background: mine ? "#dcf8c6" : "#fff", padding: 8, borderRadius: 6, boxShadow: "0 0 0 1px rgba(0,0,0,0.03)" }}>
-                <div style={{ fontSize: 14, marginBottom: 4 }}>{m.message}</div>
-                <div style={{ fontSize: 10, opacity: 0.6 }}>{new Date(m.timestamp || Date.now()).toLocaleString()}</div>
+      <div ref={listRef} className="messages">
+        {messages.length === 0 ? (
+          <div style={{ textAlign: "center", color: "var(--muted)", padding: 24 }}>No messages yet — say hello!</div>
+        ) : (
+          messages.map((m) => {
+            const mine = m.senderId === user.id;
+            return (
+              <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
+                <div className={`message ${mine ? "me" : "other"}`}>
+                  <div style={{ fontSize: 14 }}>{m.message}</div>
+                  <div className="meta">
+                    {m.senderUsername ? `${m.senderUsername} • ` : ""}
+                    {m.timestamp ? new Date(m.timestamp).toLocaleString() : ""}
+                  </div>
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })
+        )}
       </div>
 
-      <form onSubmit={sendMessage} style={{ display: "flex", gap: 8 }}>
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Type a message" />
+      <form onSubmit={sendMessage} className="message-input-wrap" style={{ alignItems: "center" }}>
+        <input
+          className="message-input"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          aria-label="Type a message"
+          /* intentionally no placeholder to match your requirement */
+        />
         <button className="btn" type="submit">Send</button>
       </form>
     </div>
