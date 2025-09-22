@@ -1,0 +1,35 @@
+name: Build and deploy to gh-pages
+
+# Trigger on push to the main branch. If your default branch is 'master' change to master.
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 18.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install dependencies (uses npm install because package-lock.json may be missing)
+        run: npm install
+
+      - name: Build production bundle
+        run: npm run build
+
+      - name: Deploy to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./build
+          commit_message: "Deploy from GitHub Actions: ${{ github.sha }}"
