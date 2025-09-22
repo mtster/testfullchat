@@ -7,9 +7,6 @@ import {
   ref,
   push,
   set,
-  query,
-  orderByChild,
-  equalTo,
   get,
 } from "firebase/database";
 import "../index.css";
@@ -39,6 +36,7 @@ export default function NewChatModal({ onClose }) {
     if (!participants.includes(user.username)) participants.push(user.username);
 
     try {
+      // resolve usernames -> ids
       const usersRef = ref(rtdb, "users");
       const usersSnap = await get(usersRef);
       const usersVal = (usersSnap && usersSnap.val()) || {};
@@ -71,20 +69,28 @@ export default function NewChatModal({ onClose }) {
         }
       }
 
-      // create chat
-      const newChatRef = push(chatsRef);
-      const chatId = newChatRef.key;
+      // create chat payload - ensure no undefineds
+      const chatIdRef = push(chatsRef);
+      const chatId = chatIdRef.key;
       const payload = {
+        id: chatId,
         name,
         participants: found.map((f) => f.id),
         participantUsernames: found.map((f) => f.username),
         createdAt: Date.now(),
-        createdBy: user.id,
+        createdBy: user && user.id ? user.id : null,
         lastMessage: null,
         lastMessageAt: null,
       };
-      await set(newChatRef, payload);
 
+      // sanitize undefined -> null (RTDB rejects undefined)
+      Object.keys(payload).forEach((k) => {
+        if (payload[k] === undefined) payload[k] = null;
+      });
+
+      await set(chatIdRef, payload);
+
+      // register chat under each user's userChats
       await Promise.all(
         found.map((p) => set(ref(rtdb, `userChats/${p.id}/${chatId}`), { chatId, addedAt: Date.now() }))
       );
