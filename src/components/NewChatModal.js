@@ -1,8 +1,8 @@
 // src/components/NewChatModal.js
-import { rtdb } from "../firebase";
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthProvider";
+import { rtdb } from "../firebase";
 import {
   ref,
   push,
@@ -12,16 +12,14 @@ import {
   equalTo,
   get,
 } from "firebase/database";
+import "../index.css";
 
 export default function NewChatModal({ onClose }) {
-  const navigate = useNavigate();
   const { user } = useAuth();
   const [chatName, setChatName] = useState("");
   const [participantUsernames, setParticipantUsernames] = useState("");
   const [err, setErr] = useState(null);
-
-  // use the already-initialized rtdb instance
-  const rdb = rtdb;
+  const navigate = useNavigate();
 
   const createChat = async (e) => {
     e && e.preventDefault();
@@ -38,73 +36,87 @@ export default function NewChatModal({ onClose }) {
       .map((s) => s.trim())
       .filter(Boolean);
 
-    // ensure the current user is included
-    if (!participants.includes(user.username)) {
-      participants.push(user.username);
-    }
+    if (!participants.includes(user.username)) participants.push(user.username);
 
     try {
-      // find participant user ids
-      const usersRef = ref(rdb, "users");
+      const usersRef = ref(rtdb, "users");
       const usersSnap = await get(usersRef);
       const usersVal = (usersSnap && usersSnap.val()) || {};
-      const userMap = {};
-      Object.entries(usersVal).forEach(([id, u]) => {
-        if (u && u.username) userMap[u.username] = { id, ...u };
+      const usernameToId = {};
+      Object.entries(usersVal).forEach(([uid, u]) => {
+        if (u && u.username) usernameToId[u.username] = uid;
       });
 
-      const participantIds = participants
-        .map((uname) => userMap[uname])
-        .filter(Boolean)
-        .map((u) => u.id);
+      const found = [];
+      for (const uname of participants) {
+        if (!usernameToId[uname]) {
+          throw new Error(`User not found: ${uname}`);
+        }
+        found.push({ id: usernameToId[uname], username: uname });
+      }
+
+      // check duplicates
+      const chatsRef = ref(rtdb, "chats");
+      const chatsSnap = await get(chatsRef);
+      const chatsVal = (chatsSnap && chatsSnap.val()) || {};
+      const participantIdsSorted = found.map(f => f.id).sort().join("|");
+      for (const [cid, c] of Object.entries(chatsVal)) {
+        const cParticipants = c.participants || [];
+        const cPartSorted = Array.isArray(cParticipants) ? cParticipants.slice().sort().join("|") : "";
+        const sameName = (c.name || "").trim() === name;
+        if (sameName && cPartSorted === participantIdsSorted) {
+          if (onClose) onClose();
+          navigate(`/chats/${cid}`);
+          return;
+        }
+      }
 
       // create chat
-      const chatsRef = ref(rdb, "chats");
       const newChatRef = push(chatsRef);
       const chatId = newChatRef.key;
-      const chatObj = {
-        id: chatId,
+      const payload = {
         name,
-        participants: participantIds,
+        participants: found.map((f) => f.id),
+        participantUsernames: found.map((f) => f.username),
         createdAt: Date.now(),
         createdBy: user.id,
+        lastMessage: null,
+        lastMessageAt: null,
       };
-      await set(newChatRef, chatObj);
+      await set(newChatRef, payload);
 
-      // register chat under each user's userChats
       await Promise.all(
-        participantIds.map((pid) =>
-          set(ref(rdb, `userChats/${pid}/${chatId}`), { chatId, addedAt: Date.now() })
-        )
+        found.map((p) => set(ref(rtdb, `userChats/${p.id}/${chatId}`), { chatId, addedAt: Date.now() }))
       );
 
       if (onClose) onClose();
       navigate(`/chats/${chatId}`);
-    } catch (err) {
-      console.error("createChat error", err);
-      setErr("Failed to create chat");
+    } catch (error) {
+      console.error("createChat error", error);
+      setErr((error && error.message) || "Failed to create chat.");
     }
   };
 
   return (
     <>
-      <div className="modal-backdrop" />
-      <div className="modal">
-        <h3>New Chat</h3>
-        <form onSubmit={createChat} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <label>
-            Chat name
+      <div className="modal-overlay" onClick={() => onClose && onClose()} />
+      <div className="modal" role="dialog" aria-modal="true">
+        <h3 style={{ marginTop: 0 }}>New Chat</h3>
+        <p className="help">Give the chat a name and list participants by username (comma-separated).</p>
+        <form onSubmit={createChat} style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
+          <div className="form-row">
+            <label>Chat name</label>
             <input value={chatName} onChange={(e) => setChatName(e.target.value)} />
-          </label>
+          </div>
 
-          <label>
-            Participants (comma-separated usernames)
-            <input value={participantUsernames} onChange={(e) => setParticipantUsernames(e.target.value)} />
-          </label>
+          <div className="form-row">
+            <label>Participants (comma-separated usernames)</label>
+            <input value={participantUsernames} onChange={(e) => setParticipantUsernames(e.target.value)} placeholder="alice, bob" />
+          </div>
 
-          {err && <div style={{ color: "salmon", marginBottom: 8 }}>{err}</div>}
+          {err && <div style={{ color: "salmon" }}>{err}</div>}
 
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button className="btn" type="submit">Create</button>
             <button className="btn secondary" type="button" onClick={() => onClose && onClose()}>
               Cancel
