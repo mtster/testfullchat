@@ -3,23 +3,26 @@
   <head>
     <meta charset="utf-8" />
 
-    <!-- Use manifest (note the cache-bust param; remove or bump when updating icons/manifest again) -->
-    <link rel="manifest" href="%PUBLIC_URL%/manifest.json?v=2" />
+    <!-- PWA manifest (cache-bust param for quick refresh; bump it if you later change icons) -->
+    <link rel="manifest" href="%PUBLIC_URL%/manifest.json?v=3" />
 
-    <!-- Theme color for mobile browsers -->
+    <!-- Browser theme color -->
     <meta name="theme-color" content="#0f1720" />
 
-    <!-- iOS specific meta -->
+    <!-- iOS web app -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Protocol" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="description" content="Protocol — a lightweight private chat" />
 
-    <!-- Favicons / icons (pointing into the icons/ folder) -->
-    <link rel="icon" type="image/png" sizes="192x192" href="%PUBLIC_URL%/icons/icon-192.png" />
-    <link rel="icon" type="image/png" sizes="512x512" href="%PUBLIC_URL%/icons/icon-512.png" />
+    <!-- Favicons for browser tab (use a 32x32 icon for best cross-browser results) -->
+    <link rel="icon" type="image/png" sizes="32x32" href="%PUBLIC_URL%/icons/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="%PUBLIC_URL%/icons/icon-192.png" />
+    <link rel="shortcut icon" href="%PUBLIC_URL%/icons/icon-192.png" />
 
-    <!-- iOS home screen icons (iOS ignores manifest, so we must provide apple-touch-icon) -->
+    <!-- iOS home screen icons (iOS ignores manifest) -->
     <link rel="apple-touch-icon" sizes="180x180" href="%PUBLIC_URL%/icons/icon-192.png" />
     <link rel="apple-touch-icon" sizes="512x512" href="%PUBLIC_URL%/icons/icon-512.png" />
 
