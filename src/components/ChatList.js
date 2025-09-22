@@ -1,20 +1,19 @@
 // src/components/ChatList.js
-import { rtdb } from "../firebase";
 import React, { useEffect, useState } from "react";
 import { useAuth } from "./AuthProvider";
-import { useNavigate, Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { rtdb } from "../firebase";
 import { ref, onValue, get } from "firebase/database";
 import NewChatModal from "./NewChatModal";
 import ChatItem from "./ChatItem";
+import "../index.css";
 
 export default function ChatList() {
   const { user, logout } = useAuth();
   const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showNewChat, setShowNewChat] = useState(false);
-
-  // use the already-initialized rtdb instance
-  const rdb = rtdb;
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!user) {
@@ -23,57 +22,81 @@ export default function ChatList() {
       return;
     }
     setLoading(true);
-    const userChatsRef = ref(rdb, `userChats/${user.id}`);
+    const userChatsRef = ref(rtdb, `userChats/${user.id}`);
+
     const unsub = onValue(userChatsRef, async (snapshot) => {
       const val = snapshot.val() || {};
       const chatIds = Object.keys(val || {});
-      // fetch chat details in parallel
-      const chatPromises = chatIds.map(async (cid) => {
-        const chatSnap = await get(ref(rdb, `chats/${cid}`));
-        return chatSnap.exists() ? { id: cid, ...chatSnap.val() } : null;
-      });
-      const chatResults = (await Promise.all(chatPromises)).filter(Boolean);
-      setChats(chatResults);
-      setLoading(false);
+      try {
+        const chatPromises = chatIds.map(async (cid) => {
+          const snap = await get(ref(rtdb, `chats/${cid}`));
+          if (!snap || !snap.exists()) return null;
+          return { id: cid, ...snap.val() };
+        });
+        const results = (await Promise.all(chatPromises)).filter(Boolean);
+        results.sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0));
+        setChats(results);
+      } catch (err) {
+        console.error("ChatList: error fetching chats", err);
+        setChats([]);
+      } finally {
+        setLoading(false);
+      }
     });
-    return () => unsub();
-  }, [user, rdb]);
+
+    return () => {
+      try { unsub(); } catch (e) {}
+    };
+  }, [user]);
 
   if (!user) return null;
 
   return (
-    <div style={{ maxWidth: 1000, margin: "12px auto", padding: 12 }}>
-      {/* Top bar - only here */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <strong>FRBS Chat</strong>
+    <div className="app-wrap">
+      <div className="topbar">
+        <div className="app-title">
+          <img src="/icon-192.png" alt="Protocol" style={{ width: 36, height: 36, borderRadius: 8 }} />
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <div style={{ fontSize: 18 }}>Protocol</div>
+            <div style={{ fontSize: 12, color: "var(--muted)" }}>Private. Light. Fast.</div>
+          </div>
         </div>
 
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          <div style={{ fontSize: 14, opacity: 0.9 }}>Signed in as <strong>{user.username}</strong></div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <button className="btn" onClick={() => setShowNewChat(true)}>New chat</button>
-          <button className="btn secondary" onClick={() => { logout(); }}>Logout</button>
+          <button className="btn logout" onClick={() => { logout(); navigate("/login"); }}>Logout</button>
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 12 }}>
-        <div style={{ width: 300 }}>
-          {loading ? (
-            <div>Loading chats...</div>
-          ) : (
-            <div className="chat-list">
-              {chats.map((c) => (
-                <Link key={c.id} to={`/chats/${c.id}`} style={{ textDecoration: "none", color: "inherit" }}>
-                  <ChatItem chat={c} />
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
+      <div className="layout" style={{ marginTop: 12 }}>
+        <aside className="sidebar">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontWeight: 700 }}>Chats</div>
+            <div style={{ color: "var(--muted)" }}>{user.username}</div>
+          </div>
 
-        <div style={{ flex: 1 }}>
-          {/* main chat view will render via router */}
-        </div>
+          <div className="chat-list">
+            {loading ? (
+              <div style={{ padding: 12, color: "var(--muted)" }}>Loading chats…</div>
+            ) : (
+              <>
+                {chats.length === 0 && <div style={{ padding: 12, color: "var(--muted)" }}>No chats yet</div>}
+                {chats.map((c) => (
+                  <Link key={c.id} to={`/chats/${c.id}`} style={{ textDecoration: "none", color: "inherit" }}>
+                    <ChatItem chat={c} />
+                  </Link>
+                ))}
+              </>
+            )}
+          </div>
+        </aside>
+
+        <main className="panel" style={{ minHeight: 420 }}>
+          {/* main chat view is displayed by router */}
+          <div style={{ color: "var(--muted)" }}>
+            Open or create a chat to start messaging.
+          </div>
+        </main>
       </div>
 
       {showNewChat && <NewChatModal onClose={() => setShowNewChat(false)} />}
