@@ -16,11 +16,13 @@ export default function ChatList() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!user) {
-      setChats([]);
-      setLoading(false);
-      return;
-    }
+    // inside useEffect in ChatList.js
+if (!user || !user.id) {
+  setChats([]);
+  setLoading(false);
+  return;
+}
+
     setLoading(true);
     const userChatsRef = ref(rtdb, `userChats/${user.id}`);
 
