@@ -3,17 +3,18 @@
   "name": "Protocol Chat",
   "icons": [
     {
-      "src": "/icons/icon-192.png",
+      "src": "%PUBLIC_URL%/icons/icon-192.png",
       "sizes": "192x192",
       "type": "image/png"
     },
     {
-      "src": "/icons/icon-512.png",
+      "src": "%PUBLIC_URL%/icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png"
     }
   ],
-  "start_url": ".",
+  "start_url": "%PUBLIC_URL%/",
+  "scope": "%PUBLIC_URL%/",
   "display": "standalone",
   "background_color": "#0b0f14",
   "theme_color": "#0f1720",
