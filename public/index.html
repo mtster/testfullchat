@@ -2,13 +2,27 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+
+    <!-- Use manifest (note the cache-bust param; remove or bump when updating icons/manifest again) -->
+    <link rel="manifest" href="%PUBLIC_URL%/manifest.json?v=2" />
+
+    <!-- Theme color for mobile browsers -->
     <meta name="theme-color" content="#0f1720" />
+
+    <!-- iOS specific meta -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Protocol" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="description" content="Protocol — a lightweight private chat" />
-    <link rel="icon" href="%PUBLIC_URL%/icon-192.png" />
+
+    <!-- Favicons / icons (pointing into the icons/ folder) -->
+    <link rel="icon" type="image/png" sizes="192x192" href="%PUBLIC_URL%/icons/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="%PUBLIC_URL%/icons/icon-512.png" />
+
+    <!-- iOS home screen icons (iOS ignores manifest, so we must provide apple-touch-icon) -->
+    <link rel="apple-touch-icon" sizes="180x180" href="%PUBLIC_URL%/icons/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="512x512" href="%PUBLIC_URL%/icons/icon-512.png" />
+
     <title>Protocol</title>
   </head>
   <body>
