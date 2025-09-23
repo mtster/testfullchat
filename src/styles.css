@@ -1,4 +1,4 @@
-/* src/index.css - Protocol theme */
+/* src/index.css - Protocol theme (safe-area & responsive fixes) */
 
 /* Theme variables */
 :root {
@@ -17,51 +17,58 @@
   font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
 }
 
-/* Safe-area vars (iOS notch / home bar) */
+/* Safe area env vars (with fallback) */
 :root {
-  --safe-top: env(safe-area-inset-top);
-  --safe-right: env(safe-area-inset-right);
-  --safe-bottom: env(safe-area-inset-bottom);
-  --safe-left: env(safe-area-inset-left);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
 }
 
-/* Page base */
+/* Page base - ensure dark background covers entire viewport (no white gaps) */
 html, body, #root {
   height: 100%;
-  background: linear-gradient(180deg, var(--bg), #071018);
-  color: var(--text);
   margin: 0;
   padding: 0;
+  background: linear-gradient(180deg, var(--bg), #071018);
+  color: var(--text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
 }
 
-/* Make inputs touch-friendly and avoid iOS zoom */
+/* Prevent iOS zoom on inputs */
 input, textarea, button, select {
-  font-size: 16px; /* prevents iOS zoom */
+  font-size: 16px;
   font-family: inherit;
+}
+
+/* Apply safe area padding at the top and bottom at the page root */
+body {
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
+  box-sizing: border-box;
 }
 
 /* App container */
 .app-wrap {
   max-width: var(--container-max);
   margin: 18px auto;
-  padding: 16px;
+  padding: 12px;
   box-sizing: border-box;
-  padding-top: calc(16px + var(--safe-top));
-  padding-left: calc(16px + var(--safe-left));
-  padding-right: calc(16px + var(--safe-right));
+  min-height: calc(100vh - var(--safe-top) - var(--safe-bottom));
+  /* ensure background is consistent */
+  background: transparent;
 }
 
-/* Header & topbar */
+/* Topbar/header - keep normal height, do NOT add extra safe-top padding here */
 .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
-  padding: 12px 16px;
-  padding-top: calc(12px + var(--safe-top));
+  padding: 12px 16px; /* keep fixed header height */
   border-radius: 12px;
   box-shadow: 0 4px 20px rgba(2,6,23,0.6);
   position: relative;
@@ -78,11 +85,11 @@ input, textarea, button, select {
   color: var(--text);
 }
 
-/* Logo image in header */
+/* small logo sizing */
 .app-title img {
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
   object-fit: cover;
 }
 
@@ -96,7 +103,7 @@ input, textarea, button, select {
   font-weight: 600;
   cursor: pointer;
   box-shadow: 0 6px 18px rgba(14, 95, 69, 0.08);
-  min-height: 36px; /* touch target */
+  min-height: 36px;
 }
 .btn.secondary {
   background: transparent;
@@ -122,12 +129,12 @@ input, textarea, button, select {
   .layout { grid-template-columns: 1fr; }
 }
 
-/* Sidebar - chat list */
+/* Sidebar */
 .sidebar {
   background: linear-gradient(180deg, var(--panel), var(--muted-panel));
   padding: 12px;
   border-radius: 12px;
-  min-height: 60vh;
+  min-height: calc(60vh - var(--safe-bottom));
 }
 
 /* Chat list entries */
@@ -173,25 +180,25 @@ input, textarea, button, select {
   white-space: nowrap;
 }
 
-/* Main chat panel */
+/* Main panel */
 .panel {
   background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.02));
   padding: 12px;
   border-radius: 12px;
-  min-height: 60vh;
+  min-height: calc(60vh - var(--safe-top) - var(--safe-bottom));
   display:flex;
   flex-direction: column;
-  padding-left: calc(12px + var(--safe-left));
-  padding-right: calc(12px + var(--safe-right));
+  box-sizing: border-box;
 }
 
 /* Chat view */
 .chat-view {
   display:flex;
   flex-direction:column;
-  height: calc(100vh - 168px);
+  height: calc(100vh - 168px - var(--safe-top) - var(--safe-bottom));
   gap: 12px;
   padding-bottom: calc(8px + var(--safe-bottom));
+  box-sizing: border-box;
 }
 
 /* Chat header */
@@ -212,7 +219,7 @@ input, textarea, button, select {
   cursor:pointer;
 }
 
-/* Messages container */
+/* Messages */
 .messages {
   flex:1;
   overflow:auto;
@@ -324,8 +331,15 @@ input, textarea, button, select {
 
 /* Fallback for browsers without env() */
 @supports(not (padding: env(safe-area-inset-top))) {
-  .app-wrap { padding-top: 16px; padding-left:16px; padding-right:16px; }
+  body { padding-top: 0; padding-bottom: 0; }
+  .app-wrap { padding-top: 12px; padding-bottom: 12px; }
   .topbar { padding-top: 12px; }
   .chat-view { padding-bottom: 8px; }
   .message-input-wrap { padding-bottom: 8px; }
+}
+
+/* make sure the entire app never shows white behind (global) */
+html, body, #root, .app-wrap, .panel {
+  background-color: transparent;
+  background-image: linear-gradient(180deg, var(--bg), #071018);
 }
