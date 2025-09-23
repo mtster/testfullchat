@@ -9,17 +9,22 @@
     <!-- Browser theme color -->
     <meta name="theme-color" content="#0f1720" />
 
-    <!-- Standard favicon / browser icon (ensures icon shows inside normal browser tabs) -->
-    <link rel="icon" href="%PUBLIC_URL%/icons/icon-192.png" />
-    <link rel="shortcut icon" href="%PUBLIC_URL%/icons/icon-192.png" />
-
-    <!-- Safari pinned tab / mask-icon (optional, will be ignored if you don't have an SVG) -->
-    <!-- <link rel="mask-icon" href="%PUBLIC_URL%/icons/icon-mask.svg" color="#6ee7b7"> -->
-
     <!-- iOS web app -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Protocol" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="description" content="Protocol — a lightweight private chat" />
+
+    <!-- Favicons for browser tab (use a 32x32 icon for best cross-browser results) -->
+    <link rel="icon" type="image/png" sizes="192x192" href="%PUBLIC_URL%/icons/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="%PUBLIC_URL%/icons/icon-512.png" />
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/icons/icon-192.png" />
+
+    <!-- Added small cross-browser favicon entries so the icon shows up in browser tabs/addresses -->
+    <link rel="icon" type="image/png" sizes="32x32" href="%PUBLIC_URL%/icons/icon-192.png" />
+    <link rel="shortcut icon" href="%PUBLIC_URL%/icons/icon-192.png" />
 
     <!-- iOS home screen icons (iOS ignores manifest) -->
     <link rel="apple-touch-icon" sizes="180x180" href="%PUBLIC_URL%/icons/icon-192.png" />
