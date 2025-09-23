@@ -264,14 +264,16 @@ body {
 .message-input-wrap {
   position: sticky;
   bottom: 0;
-  display:flex;
+  display: flex;
   gap: 8px;
-  align-items:center;
-  padding-top: 8px;
-  margin-top: 8px;
+  align-items: center;
+  padding: 8px;
+  margin-top: auto;
   background: linear-gradient(180deg, transparent, rgba(0,0,0,0.02));
-  padding-bottom: calc(8px + var(--safe-bottom));
+  padding-bottom: calc(8px + var(--safe-bottom)); /* respects iPhone home bar */
+  box-sizing: border-box;
 }
+
 .message-input {
   flex: 1;
   padding: 10px 12px;
