@@ -35,6 +35,12 @@ html, body, #root {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   min-height: 100vh;
+
+  /* Prevent the page itself from scrolling / overscrolling.
+     Scrolling will happen inside the messages container instead.
+     This avoids the white background being exposed when swiping/pulling. */
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 /* Prevent iOS zoom on inputs */
@@ -223,11 +229,14 @@ body {
 .messages {
   flex:1;
   overflow:auto;
+  -webkit-overflow-scrolling: touch;
   padding: 12px;
   display:flex;
   flex-direction:column;
   gap: 10px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.005), rgba(255,255,255,0.01));
+
+  /* Use the same background as the main panel so it doesn't look lighter */
+  background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.02));
   border-radius: 10px;
 }
 
@@ -347,12 +356,12 @@ html, body, #root, .app-wrap, .panel {
 }
 
 /* --------------------------------------------------
-   Mobile-only composer fix (minimal, non-invasive)
+   Mobile-only composer fix (non-invasive, scoped)
    - Pins the composer to the viewport bottom on narrow screens
    - Respects safe-area insets so it won't overlap the iPhone home indicator
    - Adds extra bottom padding to messages so content isn't hidden
-   This is intentionally scoped to small screens only and does not change
-   any of your existing desktop styling or layout rules.
+   - Makes the messages area visually attach to the composer (no lighter patch)
+   - Disables page-level scroll/overscroll so the app cannot be dragged to reveal white
    -------------------------------------------------- */
 @media (max-width: 900px) {
   .message-input-wrap {
@@ -370,5 +379,16 @@ html, body, #root, .app-wrap, .panel {
   .messages {
     padding-bottom: calc(92px + var(--safe-bottom));
     box-sizing: border-box;
+
+    /* remove rounded bottom corners so it visually hugs the composer */
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
   }
+
+  /* Remove the vertical gap between messages area and composer so they attach */
+  .chat-view {
+    gap: 0;
+  }
+
+  /* sidebar / other areas keep their own scroll if needed */
 }
