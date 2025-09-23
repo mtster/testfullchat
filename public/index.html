@@ -22,9 +22,14 @@
     <link rel="icon" type="image/png" sizes="512x512" href="%PUBLIC_URL%/icons/icon-512.png" />
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/icons/icon-192.png" />
 
-    <!-- Added small cross-browser favicon entries so the icon shows up in browser tabs/addresses -->
+    <!-- small cross-browser favicon entries (fallbacks) -->
     <link rel="icon" type="image/png" sizes="32x32" href="%PUBLIC_URL%/icons/icon-192.png" />
     <link rel="shortcut icon" href="%PUBLIC_URL%/icons/icon-192.png" />
+
+    <!-- Inline SVG data-URI fallback icon:
+         If file-based favicons fail for some environments, this ensures the browser/tab still shows an icon.
+         (This is intentionally an additional fallback link; it does not remove your existing files.) -->
+    <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20fill='%230b0f14'/%3E%3Ccircle%20cx='32'%20cy='28'%20r='18'%20fill='%236ee7b7'/%3E%3Cpath%20d='M26%2036h12v10H26z'%20fill='%230b0f14'/%3E%3C/svg%3E" />
 
     <!-- iOS home screen icons (iOS ignores manifest) -->
     <link rel="apple-touch-icon" sizes="180x180" href="%PUBLIC_URL%/icons/icon-192.png" />
