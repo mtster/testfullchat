@@ -17,6 +17,14 @@
   font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
 }
 
+/* Safe-area vars (iOS notch / home bar) */
+:root {
+  --safe-top: env(safe-area-inset-top);
+  --safe-right: env(safe-area-inset-right);
+  --safe-bottom: env(safe-area-inset-bottom);
+  --safe-left: env(safe-area-inset-left);
+}
+
 /* Page base */
 html, body, #root {
   height: 100%;
@@ -40,6 +48,9 @@ input, textarea, button, select {
   margin: 18px auto;
   padding: 16px;
   box-sizing: border-box;
+  padding-top: calc(16px + var(--safe-top));
+  padding-left: calc(16px + var(--safe-left));
+  padding-right: calc(16px + var(--safe-right));
 }
 
 /* Header & topbar */
@@ -50,8 +61,11 @@ input, textarea, button, select {
   gap: 12px;
   background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
   padding: 12px 16px;
+  padding-top: calc(12px + var(--safe-top));
   border-radius: 12px;
   box-shadow: 0 4px 20px rgba(2,6,23,0.6);
+  position: relative;
+  z-index: 20;
 }
 
 .app-title {
@@ -64,7 +78,15 @@ input, textarea, button, select {
   color: var(--text);
 }
 
-/* Buttons (keeps your existing .btn classes but we refine) */
+/* Logo image in header */
+.app-title img {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+/* Buttons */
 .btn {
   background: var(--accent);
   color: #022413;
@@ -74,14 +96,13 @@ input, textarea, button, select {
   font-weight: 600;
   cursor: pointer;
   box-shadow: 0 6px 18px rgba(14, 95, 69, 0.08);
+  min-height: 36px; /* touch target */
 }
 .btn.secondary {
   background: transparent;
   color: var(--muted);
   border: 1px solid rgba(255,255,255,0.03);
 }
-
-/* Logout button fix: less bright, readable text */
 .btn.logout {
   background: transparent;
   color: var(--text);
@@ -97,12 +118,8 @@ input, textarea, button, select {
   gap: 16px;
   margin-top: 14px;
 }
-
-/* Responsive */
 @media (max-width: 900px) {
-  .layout {
-    grid-template-columns: 1fr;
-  }
+  .layout { grid-template-columns: 1fr; }
 }
 
 /* Sidebar - chat list */
@@ -120,7 +137,6 @@ input, textarea, button, select {
   gap: 8px;
   margin-top: 12px;
 }
-
 .chat-item {
   display: flex;
   flex-direction: column;
@@ -130,7 +146,7 @@ input, textarea, button, select {
   background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.015));
   transition: transform .12s ease, box-shadow .12s ease;
   cursor: pointer;
-  width: calc(100% - 8px); /* leave a small margin on both sides */
+  width: calc(100% - 8px);
   box-sizing: border-box;
 }
 .chat-item:hover {
@@ -165,14 +181,17 @@ input, textarea, button, select {
   min-height: 60vh;
   display:flex;
   flex-direction: column;
+  padding-left: calc(12px + var(--safe-left));
+  padding-right: calc(12px + var(--safe-right));
 }
 
-/* Chat view specifics */
+/* Chat view */
 .chat-view {
   display:flex;
   flex-direction:column;
-  height: calc(100vh - 168px); /* allow header & margins to exist */
+  height: calc(100vh - 168px);
   gap: 12px;
+  padding-bottom: calc(8px + var(--safe-bottom));
 }
 
 /* Chat header */
@@ -234,7 +253,7 @@ input, textarea, button, select {
   margin-top: 6px;
 }
 
-/* Input area is sticky at the bottom of the panel */
+/* Input area */
 .message-input-wrap {
   position: sticky;
   bottom: 0;
@@ -244,9 +263,8 @@ input, textarea, button, select {
   padding-top: 8px;
   margin-top: 8px;
   background: linear-gradient(180deg, transparent, rgba(0,0,0,0.02));
+  padding-bottom: calc(8px + var(--safe-bottom));
 }
-
-/* Input box */
 .message-input {
   flex: 1;
   padding: 10px 12px;
@@ -258,15 +276,13 @@ input, textarea, button, select {
   min-height: 44px;
 }
 
-/* Modal overlay (darkened, matches app but slightly different) */
+/* Modal overlay */
 .modal-overlay {
   position: fixed;
   inset: 0;
   background: rgba(5,8,10,0.6);
   z-index: 60;
 }
-
-/* Modal box */
 .modal {
   position: fixed;
   left: 50%;
@@ -303,13 +319,13 @@ input, textarea, button, select {
   outline: none;
 }
 
-/* Small helper */
-.help {
-  font-size: 13px;
-  color: var(--muted);
-}
+/* Helper */
+.help { font-size: 13px; color: var(--muted); }
 
-/* Tiny fix for iPhone Safe Area */
-@supports(padding: max(0px)) {
-  body { padding-bottom: env(safe-area-inset-bottom); }
+/* Fallback for browsers without env() */
+@supports(not (padding: env(safe-area-inset-top))) {
+  .app-wrap { padding-top: 16px; padding-left:16px; padding-right:16px; }
+  .topbar { padding-top: 12px; }
+  .chat-view { padding-bottom: 8px; }
+  .message-input-wrap { padding-bottom: 8px; }
 }
