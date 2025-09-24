@@ -35,13 +35,31 @@
     <link rel="apple-touch-icon" sizes="180x180" href="%PUBLIC_URL%/icons/icon-192.png" />
     <link rel="apple-touch-icon" sizes="512x512" href="%PUBLIC_URL%/icons/icon-512.png" />
 
-
-
     <!-- OneSignal Web SDK (required for web push) -->
-<script src="https://cdn.onesignal.com/sdks/OneSignalSDK.js" async=""></script>
+    <script src="https://cdn.onesignal.com/sdks/OneSignalSDK.js" async=""></script>
 
+    <!-- OneSignal explicit initialization (safe, minimal)
+         Replace REPLACE_WITH_ONESIGNAL_APP_ID with your OneSignal App ID.
+         If OneSignal provided a Safari web id for iOS, uncomment and paste it into safari_web_id.
+    -->
+    <script>
+      window.OneSignal = window.OneSignal || [];
+      OneSignal.push(function() {
+        try {
+          OneSignal.init({
+            appId: "065caa62-cfe3-4bcf-ac90-2fdf30c168d7",
+            allowLocalhostAsSecureOrigin: true,
+            // If OneSignal provided a safari_web_id for Safari/iOS, uncomment below and paste it:
+            // safari_web_id: "web.<your-safari-web-id-here>",
+            notifyButton: { enable: false }
+          });
+        } catch (e) {
+          // initialization must never break your app
+          console.warn("OneSignal.init error", e);
+        }
+      });
+    </script>
 
-    
     <title>Protocol</title>
   </head>
   <body>
