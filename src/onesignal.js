@@ -2,7 +2,7 @@
 import { rtdb } from "./firebase";
 import { ref as dbRef, set as dbSet, push as dbPush } from "firebase/database";
 
-const ONESIGNAL_APP_ID = "REPLACE_WITH_ONESIGNAL_APP_ID"; // optional duplicate; index.html init used too
+const ONESIGNAL_APP_ID = "065caa62-cfe3-4bcf-ac90-2fdf30c168d7"; // optional duplicate; index.html init used too
 const DEBUG_BASE = (uid) => `debug/onesignal/${uid || "anon"}`;
 
 function now() { return new Date().toISOString(); }
