@@ -6,9 +6,6 @@ import {
   push,
   set as dbSet,
   get,
-  query,
-  orderByChild,
-  equalTo,
   onDisconnect,
 } from "firebase/database";
 import { registerOneSignalForUser, removePlayerIdForUser } from "../onesignal";
