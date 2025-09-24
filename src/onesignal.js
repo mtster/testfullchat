@@ -1,23 +1,28 @@
-// src/onesignal.js
+// src/onesignal.js (debug-friendly)
+// Important: replace the APP ID below if you prefer to init here; index.html init is primary.
 import { rtdb } from "./firebase";
-import { ref as dbRef, set as dbSet } from "firebase/database";
+import { ref as dbRef, set as dbSet, push as dbPush } from "firebase/database";
 
-/**
- * NOTE:
- * - Replace APP_ID below with your OneSignal App ID in index.html or here (I recommend keeping the one in index.html).
- * - This module is safe to import anywhere; it checks for window.OneSignal.
- */
+const ONESIGNAL_APP_ID = "065caa62-cfe3-4bcf-ac90-2fdf30c168d7"; // also configured in index.html init
 
-const ONESIGNAL_APP_ID = "REPLACE_WITH_ONESIGNAL_APP_ID"; // optional here, index.html init is primary
+function now() { return new Date().toISOString(); }
+function debugPath(uid) { return `debug/onesignal/${uid || "anon"}`; }
+
+function writeDebug(uid, obj) {
+  try {
+    const p = dbRef(rtdb, debugPath(uid) + "/" + Date.now());
+    dbPush(p).catch(() => {});
+  } catch (e) {
+    // best-effort
+    console.warn("debug write failed", e);
+  }
+}
 
 function ensureOneSignalReady() {
-  // OneSignal has a push-queue interface; return a promise that resolves when OneSignal exists.
   return new Promise((resolve) => {
     if (typeof window === "undefined") return resolve(null);
     if (window.OneSignal) return resolve(window.OneSignal);
-    // Poll for a short while (OneSignal SDK is async)
-    const max = 50; // ~5s
-    let attempt = 0;
+    const max = 50; let attempt = 0;
     const iv = setInterval(() => {
       attempt++;
       if (window.OneSignal) {
@@ -32,93 +37,88 @@ function ensureOneSignalReady() {
   });
 }
 
-/**
- * Register the currently running browser as a OneSignal device for this userId.
- * This will call OneSignal.init (if necessary) and store the OneSignal playerId in RTDB.
- *
- * Usage: call registerOneSignalForUser(uid) AFTER user is known (on login/persist).
- */
 export async function registerOneSignalForUser(uid) {
   if (!uid) return;
   const OneSignal = await ensureOneSignalReady();
   if (!OneSignal) {
+    // SDK not loaded yet; write debug and exit
+    try { await dbSet(dbRef(rtdb, `debug/onesignal/${uid}/error`), { when: now(), msg: "OneSignal SDK missing" }); } catch (e) {}
     console.warn("OneSignal SDK not available yet");
     return;
   }
 
-  // Use the push wrapper to safely call methods
   OneSignal.push(async (os) => {
     try {
-      // If you didn't initialize OneSignal in index.html, you can initialize here:
-      // os.init({ appId: ONESIGNAL_APP_ID, allowLocalhostAsSecureOrigin: true });
-
-      // Ask for permission (non-intrusive: the SDK itself may already have asked)
-      // We will not prompt if user already allowed/denied; OneSignal SDK manages that.
-      const isSubscribed = await os.isPushNotificationsEnabled
-        ? await os.isPushNotificationsEnabled()
-        : null;
-
-      // If not subscribed, still try to get existing id; the subscriptionChange event will handle new subscriptions
-      if (os.getUserId) {
-        const playerId = await os.getUserId();
-        if (playerId) {
-          await savePlayerIdForUser(uid, playerId, os);
-        }
+      // If OneSignal hasn't been initialised yet, init it here as a fallback
+      if (!os.init) {
+        try {
+          os.init({ appId: ONESIGNAL_APP_ID, allowLocalhostAsSecureOrigin: true });
+        } catch (e) { /* non-fatal */ }
       }
 
-      // Listen for subscription changes (user grants permission, or toggles)
+      // Log current permission state
+      const perm = await (os.getNotificationPermission ? os.getNotificationPermission() : Promise.resolve(null));
+      try { await dbSet(dbRef(rtdb, `debug/onesignal/${uid}/perm`), { when: now(), perm: perm || "unknown" }); } catch (e) {}
+
+      // Try to get an existing player id (may be null)
+      let playerId = null;
+      try {
+        if (os.getUserId) playerId = await os.getUserId();
+      } catch (e) {
+        console.warn("getUserId error", e);
+      }
+
+      if (playerId) {
+        await dbSet(dbRef(rtdb, `users/${uid}/onesignalPlayerId`), playerId);
+        try { await dbSet(dbRef(rtdb, `debug/onesignal/${uid}/events`), { when: now(), event: "saved_existing_player", playerId }); } catch (e) {}
+      }
+
+      // subscriptionChange event: when the user subscribes/unsubscribes
       if (os.on) {
-        os.on("subscriptionChange", async (isSubscribedNow) => {
+        os.on("subscriptionChange", async (isSubscribed) => {
           try {
-            if (isSubscribedNow) {
-              const pid = await os.getUserId();
-              if (pid) {
-                await savePlayerIdForUser(uid, pid, os);
-              }
-            } else {
-              // unsubscribed; remove stored player id
+            const pid = await os.getUserId();
+            await dbSet(dbRef(rtdb, `debug/onesignal/${uid}/subscriptionChange`), { when: now(), isSubscribed, pid: pid || null });
+            if (isSubscribed && pid) {
+              await dbSet(dbRef(rtdb, `users/${uid}/onesignalPlayerId`), pid);
+            } else if (!isSubscribed) {
               await dbSet(dbRef(rtdb, `users/${uid}/onesignalPlayerId`), null);
             }
           } catch (e) {
-            console.warn("error in subscriptionChange handler", e);
+            console.warn("subscriptionChange handler err", e);
           }
+        });
+        // also listen for permission changes
+        os.on("notificationPermissionChange", async (permissionChange) => {
+          try {
+            await dbSet(dbRef(rtdb, `debug/onesignal/${uid}/permissionChange`), { when: now(), permissionChange });
+          } catch (e) {}
         });
       }
 
-      // It's helpful to map OneSignal external ID to your uid for debugging / segmentation
-      if (os.setExternalUserId) {
-        try {
-          os.setExternalUserId(String(uid));
-        } catch (e) {
-          // non-fatal
+      // If not subscribed, try prompting in a safe, non-intrusive manner:
+      // Only call showNativePrompt if user hasn't denied already. Many browsers manage prompts.
+      try {
+        const isEnabled = await (os.isPushNotificationsEnabled ? os.isPushNotificationsEnabled() : Promise.resolve(false));
+        if (!isEnabled && os.showNativePrompt) {
+          // Note: this will show a browser prompt. On iOS you must be a PWA (Add to Home Screen) to receive.
+          try {
+            await os.showNativePrompt();
+            await dbSet(dbRef(rtdb, `debug/onesignal/${uid}/events_after_prompt`), { when: now(), attemptedPrompt: true });
+          } catch (e) {
+            await dbSet(dbRef(rtdb, `debug/onesignal/${uid}/events_after_prompt_error`), { when: now(), error: String(e) });
+          }
         }
+      } catch (e) {
+        // non-fatal
       }
     } catch (e) {
+      try { await dbSet(dbRef(rtdb, `debug/onesignal/${uid}/error`), { when: now(), msg: String(e) }); } catch (ee) {}
       console.warn("onesignal register error", e);
     }
   });
 }
 
-async function savePlayerIdForUser(uid, playerId, os) {
-  if (!uid || !playerId) return;
-  try {
-    await dbSet(dbRef(rtdb, `users/${uid}/onesignalPlayerId`), playerId);
-    // also set an external id just in case
-    if (os && os.setExternalUserId) {
-      try {
-        os.setExternalUserId(String(uid));
-      } catch (e) {
-        // ignore
-      }
-    }
-  } catch (e) {
-    console.warn("Failed to save OneSignal playerId:", e);
-  }
-}
-
-/**
- * Remove the OneSignal player id for a user (call on logout if desired).
- */
 export async function removePlayerIdForUser(uid) {
   if (!uid) return;
   try {
