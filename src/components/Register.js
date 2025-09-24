@@ -17,8 +17,7 @@ export default function Register() {
     setErr(null);
     setLoading(true);
     try {
-      // <-- pass positional args (username, password)
-      await register(username, password);
+      await register({ username, password });
       navigate("/", { replace: true });
     } catch (error) {
       setErr(error.message || "Failed to register.");
@@ -27,26 +26,18 @@ export default function Register() {
   }
 
   return (
-    <div style={{
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      padding: 18,
-      background: "rgba(0,0,0,0.55)",
-      fontFamily: "system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial"
-    }}>
-      <div style={{
-        width: "min(980px, 96%)",
-        maxHeight: "92vh",
-        overflow: "auto",
-        background: "#fff8f6",
-        color: "#7a0000",
-        borderRadius: 10,
-        boxShadow: "0 18px 60px rgba(0,0,0,0.45)",
-        padding: 18
-      }}>
-        <h2 style={{ marginTop: 0 }}>Create account</h2>
+    <div className="app-wrap" style={{ maxWidth: 520 }}>
+      <div style={{ textAlign: "center", marginBottom: 18 }}>
+        <div className="app-title" style={{ justifyContent: "center" }}>
+          <img src="/icon-192.png" alt="Protocol" style={{ width: 36, height: 36, borderRadius: 8 }} />
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+            <div style={{ fontSize: 22 }}>Protocol</div>
+            <div style={{ fontSize: 13, color: "var(--muted)" }}>Create a new account</div>
+          </div>
+        </div>
+      </div>
 
+      <div className="panel">
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div className="form-row">
             <label>Username</label>
