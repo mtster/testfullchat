@@ -25,6 +25,10 @@ export default class ErrorBoundary extends React.Component {
       info: info && info.componentStack ? info.componentStack : null,
       time: Date.now()
     });
+    // Ensure 'info' is referenced so ESLint doesn't treat it as an unused var in CI.
+    // This is a no-op reference and does not change behavior.
+    void info;
+
     // Log so GitHub Actions logs / browsers with remote debugger can see it
     // eslint-disable-next-line no-console
     console.error("ErrorBoundary caught an error", error, info);
