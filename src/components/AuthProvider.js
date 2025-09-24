@@ -15,17 +15,6 @@ export function useAuth() {
   return useContext(AuthContext);
 }
 
-/**
- * Helper: accept either positional args (username, password)
- * or an object { username, password }.
- */
-function _normalizeCreds(a1, a2) {
-  if (a1 && typeof a1 === "object" && !Array.isArray(a1)) {
-    return { username: a1.username, password: a1.password };
-  }
-  return { username: a1, password: a2 };
-}
-
 export default function AuthProvider({ children }) {
   const [user, setUser] = useState(null); // { id, username, ... }
   const [initializing, setInitializing] = useState(true);
@@ -103,8 +92,7 @@ export default function AuthProvider({ children }) {
 
   // register(username, password)
   // simple username uniqueness check with your RTDB users root
-  const register = async (a1, a2) => {
-    const { username, password } = _normalizeCreds(a1, a2);
+  const register = async (username, password) => {
     if (!username || !password) throw new Error("username and password required");
     // ensure username is unique
     const usersRef = ref(rtdb, "users");
@@ -128,8 +116,7 @@ export default function AuthProvider({ children }) {
   };
 
   // login(username, password)
-  const login = async (a1, a2) => {
-    const { username, password } = _normalizeCreds(a1, a2);
+  const login = async (username, password) => {
     // scan users for match
     const usersRef = ref(rtdb, "users");
     const snap = await get(usersRef);
