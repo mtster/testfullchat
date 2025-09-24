@@ -11,37 +11,14 @@
 
     <!-- iOS web app -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="Protocol" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="description" content="Protocol — a lightweight private chat" />
-
-    <!-- Favicons for browser tab (use a 32x32 icon for best cross-browser results) -->
-    <link rel="icon" type="image/png" sizes="192x192" href="%PUBLIC_URL%/icons/icon-192.png" />
-    <link rel="icon" type="image/png" sizes="512x512" href="%PUBLIC_URL%/icons/icon-512.png" />
-    <link rel="apple-touch-icon" href="%PUBLIC_URL%/icons/icon-192.png" />
-
-    <!-- small cross-browser favicon entries (fallbacks) -->
-    <link rel="icon" type="image/png" sizes="32x32" href="%PUBLIC_URL%/icons/icon-192.png" />
-    <link rel="shortcut icon" href="%PUBLIC_URL%/icons/icon-192.png" />
-
-    <!-- Inline SVG data-URI fallback icon:
-         If file-based favicons fail for some environments, this ensures the browser/tab still shows an icon.
-         (This is intentionally an additional fallback link; it does not remove your existing files.) -->
-    <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20fill='%230b0f14'/%3E%3Ccircle%20cx='32'%20cy='28'%20r='18'%20fill='%236ee7b7'/%3E%3Cpath%20d='M26%2036h12v10H26z'%20fill='%230b0f14'/%3E%3C/svg%3E" />
-
-    <!-- iOS home screen icons (iOS ignores manifest) -->
-    <link rel="apple-touch-icon" sizes="180x180" href="%PUBLIC_URL%/icons/icon-192.png" />
-    <link rel="apple-touch-icon" sizes="512x512" href="%PUBLIC_URL%/icons/icon-512.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Protocol chat - PWA with Firebase Realtime Database" />
 
     <!-- OneSignal Web SDK (required for web push) -->
     <script src="https://cdn.onesignal.com/sdks/OneSignalSDK.js" async=""></script>
 
-    <!-- OneSignal explicit initialization (safe, minimal)
-         Replace REPLACE_WITH_ONESIGNAL_APP_ID with your OneSignal App ID.
-         If OneSignal provided a Safari web id for iOS, uncomment and paste it into safari_web_id.
-    -->
     <script>
       window.OneSignal = window.OneSignal || [];
       OneSignal.push(function() {
@@ -49,8 +26,11 @@
           OneSignal.init({
             appId: "065caa62-cfe3-4bcf-ac90-2fdf30c168d7",
             allowLocalhostAsSecureOrigin: true,
-            // If OneSignal provided a safari_web_id for Safari/iOS, uncomment below and paste it:
-            // safari_web_id: "web.<your-safari-web-id-here>",
+            // IMPORTANT for iOS Safari / iOS PWA:
+            // If OneSignal provided a Safari Web ID for iOS, paste it below (replace the placeholder).
+            // Example: safari_web_id: "web.12345678-aaaa-bbbb-cccc-ddddeeeeffff",
+            // If you don't have such an ID, leave commented until you add it.
+            // safari_web_id: "web.YOUR_SAFARI_WEB_ID_HERE",
             notifyButton: { enable: false }
           });
         } catch (e) {
