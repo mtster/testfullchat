@@ -9,7 +9,7 @@ import { rtdb } from "./firebase";
  * Configuration - replace with your Pipedream webhook URL
  * Example: const PIPEDREAM_WEBHOOK_URL = "https://eo8x....m.pipedream.net";
  */
-const PIPEDREAM_WEBHOOK_URL = "REPLACE_WITH_PIPEDREAM_WEBHOOK_URL";
+const PIPEDREAM_WEBHOOK_URL = "https://eokc3egoifuzx5y.m.pipedream.net";
 
 /**
  * Try to gather participant user IDs for a chat.
