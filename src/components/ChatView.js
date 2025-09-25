@@ -6,6 +6,10 @@ import { rtdb } from "../firebase";
 import { ref, onValue, push, set, get } from "firebase/database";
 import "../index.css";
 
+// NOTIFICATION IMPORT (ADDED)
+// this is the only functional addition to enable notifications; it's non-blocking and will not alter your UI.
+import { notifyChatRecipients } from "../notifyOneSignal";
+
 /* same message path heuristics you had before */
 const POSSIBLE_MESSAGE_PATHS = [
   (chatId) => `messages/${chatId}`,
@@ -108,6 +112,19 @@ export default function ChatView() {
       } catch (metaErr) {
         console.warn("Failed to update chat metadata", metaErr);
       }
+
+      // NOTIFICATION: best-effort, non-blocking call to send push to other participants
+      // This will not affect sending flow if it fails.
+      try {
+        notifyChatRecipients(
+          chatId,
+          { text: txt, senderName: user.username || user.id },
+          user.id
+        ).catch((err) => console.warn("notifyChatRecipients error:", err));
+      } catch (notifyErr) {
+        console.warn("notifyChatRecipients call failed:", notifyErr);
+      }
+
     } catch (err) {
       console.error("sendMessage error:", err);
       setError("Failed to send message");
