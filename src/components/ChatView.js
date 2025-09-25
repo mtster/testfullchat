@@ -7,7 +7,6 @@ import { ref, onValue, push, set, get } from "firebase/database";
 import "../index.css";
 
 // NOTIFICATION IMPORT (ADDED)
-// this is the only functional addition to enable notifications; it's non-blocking and will not alter your UI.
 import { notifyChatRecipients } from "../notifyOneSignal";
 
 /* same message path heuristics you had before */
@@ -120,7 +119,9 @@ export default function ChatView() {
           chatId,
           { text: txt, senderName: user.username || user.id },
           user.id
-        ).catch((err) => console.warn("notifyChatRecipients error:", err));
+        )
+          .then((res) => console.log("[ChatView] notifyChatRecipients result:", res))
+          .catch((err) => console.warn("notifyChatRecipients error:", err));
       } catch (notifyErr) {
         console.warn("notifyChatRecipients call failed:", notifyErr);
       }
