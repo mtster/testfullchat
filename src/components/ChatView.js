@@ -6,98 +6,84 @@ import { rtdb } from "../firebase";
 import { ref, onValue, push, set, get } from "firebase/database";
 import "../index.css";
 
-// NOTIFICATION IMPORT (ADDED)
-import { notifyChatRecipients } from "../notifyOneSignal";
+// NOTIFICATION IMPORT (UPDATED)
+import { notifyChatRecipients } from "../notifyPush";
 
 /* same message path heuristics you had before */
 const POSSIBLE_MESSAGE_PATHS = [
   (chatId) => `messages/${chatId}`,
   (chatId) => `chatMessages/${chatId}`,
   (chatId) => `chats/${chatId}/messages`,
-  (chatId) => `messagesByChat/${chatId}`,
-  (chatId) => `chats/${chatId}/messagesById`,
+  (chatId) => `rooms/${chatId}/messages`,
 ];
 
 export default function ChatView() {
   const { chatId } = useParams();
-  const navigate = useNavigate();
   const { user } = useAuth();
-
-  const [messages, setMessages] = useState([]);
+  const navigate = useNavigate();
   const [chat, setChat] = useState(null);
+  const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
-  const [messagesPath, setMessagesPath] = useState(null);
   const [error, setError] = useState(null);
-  const listRef = useRef(null);
+  const refScroll = useRef();
 
   useEffect(() => {
-    if (!chatId || !user) return;
-    let unsubMessages = null;
-    let unsubChat = null;
-    let mounted = true;
-
-    async function findAndSubscribe() {
-      try {
-        const chatRef = ref(rtdb, `chats/${chatId}`);
-        unsubChat = onValue(chatRef, (snap) => {
-          if (!snap || !snap.exists()) {
-            setChat(null);
-            navigate("/", { replace: true });
-            return;
-          }
-          if (mounted) setChat({ id: chatId, ...(snap.val() || {}) });
-        });
-
-        // find a message path that exists
-        let found = null;
-        for (const fn of POSSIBLE_MESSAGE_PATHS) {
-          const candidate = fn(chatId);
-          const snap = await get(ref(rtdb, candidate));
-          if (snap && snap.exists()) {
-            found = candidate;
-            break;
-          }
+    if (!chatId) return;
+    // Attempt various message paths
+    let unsub;
+    (async function subscribe() {
+      for (const p of POSSIBLE_MESSAGE_PATHS) {
+        try {
+          const r = ref(rtdb, p(chatId));
+          unsub = onValue(r, (snapshot) => {
+            const val = snapshot.val() || {};
+            const items = [];
+            Object.keys(val).forEach((k) => items.push({ id: k, ...val[k] }));
+            items.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+            setMessages(items);
+          });
+          // we set unsub reference; keep listening to first one that succeeds
+          break;
+        } catch (e) {
+          // try next path
         }
-        if (!found) found = `messages/${chatId}`;
-        if (!mounted) return;
-        setMessagesPath(found);
-
-        unsubMessages = onValue(ref(rtdb, found), (snap) => {
-          const val = snap.val() || {};
-          const arr = Object.entries(val).map(([id, v]) => ({ id, ...(v || {}) }));
-          arr.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-          setMessages(arr);
-          setTimeout(() => {
-            if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
-          }, 70);
-        }, (listenErr) => {
-          console.error("failed to attach message listener", listenErr);
-          setError("Failed to subscribe to messages");
-        });
-      } catch (err) {
-        console.error("ChatView setup error", err);
-        setError("Unable to load chat");
       }
-    }
+    })();
 
-    findAndSubscribe();
+    // read chat meta if exists
+    (async function() {
+      try {
+        const cRef = ref(rtdb, `chats/${chatId}`);
+        const snap = await get(cRef);
+        if (snap && snap.exists()) setChat(snap.val());
+      } catch (e) {}
+    })();
 
     return () => {
-      mounted = false;
-      try { if (typeof unsubMessages === "function") unsubMessages(); } catch(_) {}
-      try { if (typeof unsubChat === "function") unsubChat(); } catch(_) {}
+      try { if (unsub) unsub(); } catch(e) {}
     };
-  }, [chatId, user, navigate]);
+  }, [chatId]);
 
   async function sendMessage(e) {
-    if (e && e.preventDefault) e.preventDefault();
+    e.preventDefault();
     setError(null);
-    if (!text || !text.trim() || !chatId || !user) return;
+    if (!text || !text.trim()) return;
     const txt = text.trim();
     setText("");
     try {
-      const pathToUse = messagesPath || `messages/${chatId}`;
-      const newRef = push(ref(rtdb, pathToUse));
+      // try to find a place to write message (non-invasive)
+      let newRef;
+      for (const p of POSSIBLE_MESSAGE_PATHS) {
+        try {
+          const messagesRef = ref(rtdb, p(chatId));
+          newRef = push(messagesRef);
+          break;
+        } catch (e) {
+          // continue
+        }
+      }
+      if (!newRef) throw new Error("No message path available");
+
       await set(newRef, {
         senderId: user.id,
         senderUsername: user.username || null,
@@ -138,44 +124,19 @@ export default function ChatView() {
   return (
     <div className="chat-view">
       <div className="chat-header">
-        <button className="chat-back" onClick={() => navigate(-1)} aria-label="Go back">
-          {/* simple back chevron (SVG) */}
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <div style={{ fontWeight: 700 }}>{chat.name || `Chat ${chat.id}`}</div>
-          <div style={{ color: "var(--muted)", fontSize: 13 }}>
-            {chat.participantUsernames ? chat.participantUsernames.join(", ") : ""}
-          </div>
-        </div>
-
-        <div style={{ marginLeft: "auto", color: "var(--muted)" }}>
-          {error && <span style={{ color: "salmon" }}>{error}</span>}
-        </div>
+        <h3>{chat.chatName || "Chat"}</h3>
       </div>
 
-      <div ref={listRef} className="messages">
-        {messages.length === 0 ? (
-          <div style={{ textAlign: "center", color: "var(--muted)", padding: 24 }}>No messages yet — say hello!</div>
-        ) : (
-          messages.map((m) => {
-            const mine = m.senderId === user.id;
-            return (
-              <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
-                <div className={`message ${mine ? "me" : "other"}`}>
-                  <div style={{ fontSize: 14 }}>{m.message}</div>
-                  <div className="meta">
-                    {m.senderUsername ? `${m.senderUsername} • ` : ""}
-                    {m.timestamp ? new Date(m.timestamp).toLocaleString() : ""}
-                  </div>
-                </div>
-              </div>
-            );
-          })
-        )}
+      <div className="messages" ref={refScroll}>
+        {messages.map((m) => (
+          <div key={m.id} className={`message ${m.senderId === user.id ? "mine" : ""}`}>
+            <div className="meta">
+              <span className="sender">{m.senderUsername || m.senderId}</span>
+              <span className="time">{m.timestamp ? new Date(m.timestamp).toLocaleTimeString() : ""}</span>
+            </div>
+            <div className="body">{m.message}</div>
+          </div>
+        ))}
       </div>
 
       <form onSubmit={sendMessage} className="message-input-wrap" style={{ alignItems: "center" }}>
@@ -184,7 +145,6 @@ export default function ChatView() {
           value={text}
           onChange={(e) => setText(e.target.value)}
           aria-label="Type a message"
-          /* intentionally no placeholder to match your requirement */
         />
         <button className="btn" type="submit">Send</button>
       </form>
