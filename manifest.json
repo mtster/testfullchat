@@ -19,7 +19,4 @@
   "background_color": "#0b0f14",
   "theme_color": "#0f1720",
   "description": "Protocol — a lightweight private chat"
-  
-  "gcm_sender_id": "103953800507",
-
 }
