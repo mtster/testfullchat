@@ -1,4 +1,29 @@
 <!doctype html><html lang="en"><head>
+
+<!-- BEGIN: TEMPORARY UNHANDLED-REJECTION IGNORE (messaging unsupported browsers) -->
+<script>
+  // Prevent Firebase Messaging "unsupported-browser" unhandled rejections
+  // from stopping app startup on iOS/other unsupported environments.
+  window.addEventListener('unhandledrejection', function (ev) {
+    try {
+      const reason = ev && ev.reason;
+      const msg = (typeof reason === 'string') ? reason : (reason && reason.message) ? reason.message : '';
+      // If message indicates firebase messaging unsupported, swallow it
+      if (msg && (msg.includes('messaging/unsupported-browser') ||
+                  msg.includes("This browser doesn't support the API's required") ||
+                  msg.includes('Messaging: This browser'))) {
+        console.warn('Ignored messaging unsupported-browser unhandled rejection:', reason);
+        // prevent the rejection from being treated as uncaught
+        try { ev.preventDefault(); } catch (_) {}
+      }
+    } catch (e) {
+      // ignore any errors here
+    }
+  }, { passive: true });
+</script>
+<!-- END: TEMPORARY UNHANDLED-REJECTION IGNORE -->
+
+
   
   <base href="/testfullchat/">
 
