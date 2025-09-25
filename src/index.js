@@ -1,26 +1,37 @@
-import './index.css';
-
-
-// src/index.js  (add this near the other top-level imports)
-import { registerForPush } from "./push/registerPush";
-
-// Try to register service worker and push subscription for the currently signed-in user (best-effort)
-(async function(){
-  try{ await registerForPush(); }catch(e){ console.warn("registerForPush failed:", e);} 
-})();
-
-
-
-
-
 // src/index.js
+import './index.css';
+import "./onesignalRegister";
+
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { HashRouter } from "react-router-dom";
 import App from "./App";
 import ErrorBoundary from "./components/ErrorBoundary";
-...
-  }
+
+import registerForPush from "./push/registerPush";
+
+const container = document.getElementById("root");
+const root = createRoot(container);
+root.render(
+  <ErrorBoundary>
+    <HashRouter>
+      <App />
+    </HashRouter>
+  </ErrorBoundary>
+);
+
+// best-effort attempt to register service worker and push on app start
+try {
+  registerForPush().catch((e)=>{ console.warn('registerForPush failed', e); });
+} catch (e) {
+  console.warn('registerForPush call failed', e);
+}
+
+function showGlobalError(text) {
+  try {
+    // try to render a simple alert to user
+    alert(text);
+  } catch (e) {}
 }
 
 window.onerror = function (message, source, lineno, colno, error) {
