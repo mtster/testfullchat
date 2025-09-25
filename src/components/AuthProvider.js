@@ -9,140 +9,156 @@ import {
   query,
   orderByChild,
   equalTo,
+  onDisconnect,
+  onValue,
 } from "firebase/database";
+import { obtainFcmToken, removeFcmToken, onForegroundMessage } from "../firebase";
 
 const AuthContext = createContext();
 export function useAuth() {
   return useContext(AuthContext);
 }
 
+function persistUser(user) {
+  if (user) {
+    localStorage.setItem("user", JSON.stringify(user));
+  } else {
+    localStorage.removeItem("user");
+  }
+}
+
 export default function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("user") || "null");
+    } catch (e) {
+      return null;
+    }
+  });
   const [initializing, setInitializing] = useState(true);
 
-  // Helper: normalize user object into { id, username } and persist
-  const persistUser = (u) => {
-    if (!u) {
-      localStorage.removeItem("frbs_user");
-      setUser(null);
-      return;
-    }
-    const normalized = { id: u.id, username: u.username };
-    localStorage.setItem("frbs_user", JSON.stringify(normalized));
-    setUser(normalized);
-  };
-
   useEffect(() => {
-    let mounted = true;
-    (async function restoreUser() {
-      try {
-        const raw = localStorage.getItem("frbs_user");
-        if (!raw) {
-          if (mounted) setInitializing(false);
-          return;
-        }
-        const parsed = JSON.parse(raw);
-        // If parsed has an id and username, use it
-        if (parsed && parsed.id && parsed.username) {
-          if (mounted) persistUser(parsed);
-          return;
-        }
-        // If parsed missing id but has username, try to resolve id from DB
-        if (parsed && parsed.username) {
-          try {
-            const usersRef = ref(rtdb, "users");
-            const q = query(usersRef, orderByChild("username"), equalTo(parsed.username));
-            const snap = await get(q);
-            if (snap && snap.exists()) {
-              // pick the first matching user
-              let found = null;
-              snap.forEach((child) => {
-                const v = child.val();
-                if (!found && v && v.username === parsed.username) {
-                  found = { id: child.key, username: v.username };
-                }
-              });
-              if (found) {
-                if (mounted) persistUser(found);
-                return;
-              }
-            }
-            // if not found, clear local stored value
-            localStorage.removeItem("frbs_user");
-            if (mounted) setUser(null);
-          } catch (err) {
-            console.warn("AuthProvider: failed resolving username -> id", err);
-          }
-        } else {
-          // unknown shape, clear
-          localStorage.removeItem("frbs_user");
-          if (mounted) setUser(null);
-        }
-      } catch (err) {
-        console.warn("AuthProvider: restore parse error", err);
-        localStorage.removeItem("frbs_user");
-        if (mounted) setUser(null);
-      } finally {
-        if (mounted) setInitializing(false);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
+    setInitializing(false);
   }, []);
 
-  const register = async ({ username, password }) => {
-    username = (username || "").trim();
-    password = (password || "").trim();
-    if (!username || !password) {
-      throw new Error("Username and password are required.");
+  // presence & FCM token management
+  useEffect(() => {
+    let presenceRef = null;
+    let disconnected = null;
+    let currentToken = null;
+
+    async function setupPresenceAndFcm(u) {
+      if (!u) return;
+      // presence
+      try {
+        presenceRef = ref(rtdb, `presence/${u.id}`);
+        await set(presenceRef, true);
+        // ensure presence is removed on disconnect
+        disconnected = onDisconnect(presenceRef);
+        disconnected.remove();
+      } catch (err) {
+        console.warn("presence setup failed", err);
+      }
+
+      // keep presence updated when page unloads/visibility changes
+      const setAway = () => {
+        try { set(presenceRef, false); } catch(_) {}
+      };
+      const setHere = () => {
+        try { set(presenceRef, true); } catch(_) {}
+      };
+      window.addEventListener("beforeunload", setAway);
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") setHere();
+        else setAway();
+      });
+
+      // FCM token obtain
+      try {
+        const token = await obtainFcmToken();
+        if (token) {
+          currentToken = token;
+          try {
+            const tokenRef = ref(rtdb, `fcmTokens/${u.id}/${token}`);
+            await set(tokenRef, true);
+          } catch (err) {
+            console.warn("storing fcm token failed", err);
+          }
+        }
+      } catch (err) {
+        console.warn("obtainFcmToken failed", err);
+      }
+
+      // foreground message handling: we don't show native notification while app is visible.
+      try {
+        onForegroundMessage((payload) => {
+          // ignore by default (the app is open). You can add in-app UI alerts here if desired.
+          console.debug("Foreground push received (ignored)", payload);
+        });
+      } catch (err) {}
     }
 
+    if (user) {
+      setupPresenceAndFcm(user);
+    }
+
+    return () => {
+      // cleanup on logout / unmount
+      if (presenceRef && user) {
+        try { set(ref(rtdb, `presence/${user.id}`), false); } catch(_) {}
+      }
+      if (currentToken && user) {
+        try { removeFcmToken(currentToken); } catch(_) {}
+        try { set(ref(rtdb, `fcmTokens/${user.id}/${currentToken}`), null); } catch(_) {}
+      }
+    };
+  }, [user]);
+
+  const register = async ({ username, password }) => {
+    if (!username || !username.trim()) throw new Error("username required");
+    if (!password) throw new Error("password required");
     const usersRef = ref(rtdb, "users");
     const q = query(usersRef, orderByChild("username"), equalTo(username));
     const snap = await get(q);
-    if (snap && snap.exists()) {
-      throw new Error("User already exists.");
-    }
-
+    if (snap && snap.exists()) throw new Error("Username already taken");
     const newUserRef = push(usersRef);
-    const uid = newUserRef.key;
-    const payload = { username, password, createdAt: Date.now() };
-    await set(newUserRef, payload);
-
-    const created = { id: uid, username };
-    persistUser(created);
-    return created;
+    const userObj = { id: newUserRef.key, username: username, password: password };
+    await set(newUserRef, userObj);
+    persistUser(userObj);
+    setUser(userObj);
+    return userObj;
   };
 
   const login = async ({ username, password }) => {
-    username = (username || "").trim();
-    password = (password || "").trim();
-    if (!username || !password) {
-      throw new Error("Username and password are required.");
-    }
-
+    if (!username || !password) throw new Error("username & password required");
     const usersRef = ref(rtdb, "users");
     const q = query(usersRef, orderByChild("username"), equalTo(username));
     const snap = await get(q);
-    if (!snap || !snap.exists()) {
-      throw new Error("User not found.");
-    }
-
-    let found = null;
-    snap.forEach((child) => {
-      const v = child.val();
-      if (!found && v && v.password === password) {
-        found = { id: child.key, username: v.username };
-      }
-    });
+    const val = (snap && snap.val()) || {};
+    const found = Object.entries(val).map(([k,v]) => ({ ...v })).find(u => u.username === username && u.password === password);
     if (!found) throw new Error("Invalid username/password.");
     persistUser(found);
+    setUser(found);
     return found;
   };
 
-  const logout = () => {
+  const logout = async () => {
+    // remove presence and FCM tokens for this user
+    try {
+      if (user && user.id) {
+        await set(ref(rtdb, `presence/${user.id}`), false);
+        // remove all fcm tokens under this user (client-side best-effort)
+        const tokensSnap = await get(ref(rtdb, `fcmTokens/${user.id}`));
+        const tokens = (tokensSnap && tokensSnap.val()) || {};
+        for (const t of Object.keys(tokens)) {
+          await set(ref(rtdb, `fcmTokens/${user.id}/${t}`), null);
+        }
+      }
+    } catch (err) {
+      console.warn("logout cleanup failed", err);
+    }
     persistUser(null);
+    setUser(null);
     localStorage.removeItem("lastChat");
   };
 
