@@ -1,22 +1,17 @@
 // src/push/registerPush.js
-// Registers service worker, requests permission, subscribes to push, and saves subscription to RTDB
-import urlBase64ToUint8Array from './urlBase64ToUint8Array';
-import { rtdb } from '../firebase';
-import { ref as dbRef, set as dbSet } from 'firebase/database';
+import urlBase64ToUint8Array from "./urlBase64ToUint8Array";
+import { rtdb } from "../firebase";
+import { ref, set } from "firebase/database";
 
 /**
- * Put your VAPID public key here (base64 URL-safe). Replace before deploy.
- * You can generate a keypair with `npx web-push generate-vapid-keys` or online tools.
+ * VAPID public key (base64 url-safe)
+ * Paste your VAPID public key here exactly as provided.
  */
-const VAPID_PUBLIC_KEY = "BAdYi2DwAr_u2endCUZda9Sth0jVH8e6ceuQXn0EQAl3ALEQCF5cDoEB9jfE8zOdOpHlu0gyu1pUYFrGpU5wEWQ";
+export const VAPID_PUBLIC_KEY = "BAdYi2DwAr_u2endCUZda9Sth0jVH8e6ceuQXn0EQAl3ALEQCF5cDoEB9jfE8zOdOpHlu0gyu1pUYFrGpU5wEWQ";
 
-/**
- * Reads the current local user (if any) from localStorage key "frbs_user".
- * If your app stores the logged user under another key, adapt accordingly.
- */
-function getLocalUser() {
+async function getLocalUser() {
   try {
-    const raw = localStorage.getItem("frbs_user");
+    const raw = localStorage.getItem('user');
     if (!raw) return null;
     return JSON.parse(raw);
   } catch (e) {
@@ -24,44 +19,50 @@ function getLocalUser() {
   }
 }
 
-export async function registerForPush(user = null) {
+export default async function registerForPush() {
   try {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-      console.warn('[registerForPush] Push or ServiceWorker not supported in this browser.');
-      return null;
+    if (!('serviceWorker' in navigator)) return;
+    if (!('PushManager' in window)) return;
+    const user = await getLocalUser();
+    if (!user || !user.id) return; // best-effort: silently return if not logged in
+
+    // register service worker (best-effort)
+    let reg;
+    try {
+      reg = await navigator.serviceWorker.register('/sw.js');
+    } catch (e) {
+      console.warn('[registerForPush] sw register failed', e);
+      return;
     }
 
-    const currUser = user || getLocalUser();
-    if (!currUser || !currUser.id) {
-      console.warn('[registerForPush] no authenticated user detected; skipping subscription.');
-      return null;
-    }
-
-    // Register service worker (public/sw.js)
-    const registration = await navigator.serviceWorker.register('/sw.js');
-    // Request permission
+    // request permission
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') {
-      console.warn('[registerForPush] Notification permission not granted:', permission);
-      return null;
+      return;
     }
 
-    // Subscribe
-    const applicationServerKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
-    const subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey,
-    });
+    // subscribe
+    let subscription;
+    try {
+      const convertedVapidKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
+      subscription = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: convertedVapidKey
+      });
+    } catch (e) {
+      console.warn('[registerForPush] subscribe failed', e);
+      return;
+    }
 
-    // Save to RTDB at users/{uid}/pushSubscription
-    await dbSet(dbRef(rtdb, `users/${currUser.id}/pushSubscription`), subscription);
-
-    console.log('[registerForPush] subscription saved for user', currUser.id);
-    return subscription;
+    // save to realtime DB at users/{uid}/pushSubscription
+    try {
+      const dbRef = ref(rtdb, `users/${user.id}/pushSubscription`);
+      await set(dbRef, subscription);
+      console.log('[registerForPush] subscription saved for user', user.id);
+    } catch (e) {
+      console.warn('[registerForPush] saving subscription failed', e);
+    }
   } catch (e) {
-    console.warn('[registerForPush] error', e);
-    return null;
+    console.warn('[registerForPush] unexpected error', e);
   }
 }
-
-export default registerForPush;
