@@ -2,17 +2,11 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore, serverTimestamp } from "firebase/firestore";
 import { getDatabase } from "firebase/database";
-import { getMessaging, getToken, deleteToken, onMessage } from "firebase/messaging";
 
 /**
- * NOTE:
- * If you cannot set environment variables during build, replace the placeholder
- * values below with your actual values (firebaseConfig already present).
- *
- * Also ensure REACT_APP_FIREBASE_VAPID_KEY contains the PUBLIC VAPID key (from
- * Firebase Console -> Project settings -> Cloud Messaging -> Web Push certificates).
+ * Firebase config - keep your existing values here (already present in your repo).
+ * Do NOT put any private keys here.
  */
-
 const firebaseConfig = {
   apiKey: "AIzaSyA-FwUy8WLXiYtT46F0f59gr461cEI_zmo",
   authDomain: "protocol-chat-b6120.firebaseapp.com",
@@ -24,132 +18,127 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-
-// Firestore (exported in case other parts use it)
 const db = getFirestore(app);
-
-// Realtime Database
 const rtdb = getDatabase(app);
 
-// VAPID key (public) — put your public VAPID key in REACT_APP_FIREBASE_VAPID_KEY
+// VAPID public key for FCM web push. Put your public VAPID key here or set it through REACT_APP_FIREBASE_VAPID_KEY
 const VAPID_KEY = (typeof process !== 'undefined' && process.env && process.env.REACT_APP_FIREBASE_VAPID_KEY)
   ? process.env.REACT_APP_FIREBASE_VAPID_KEY
-  : (typeof window !== 'undefined' && window.__REACT_APP_FIREBASE_VAPID_KEY) || "BAhd__iDU8kvxQ65a7ebCZCL8HpB9B07W4BkythVrR__ZweCuef7db6mzErw-3hPk7VhSG_LJHocyAbtDXZuAHI";
-
-let messaging = null;
-try {
-  messaging = getMessaging(app);
-} catch (err) {
-  // OK if messaging is not supported in this environment
-  console.warn("getMessaging() not available in this environment:", err && err.message);
-  messaging = null;
-}
+  : (typeof window !== 'undefined' && window.__REACT_APP_FIREBASE_VAPID_KEY) || 'YOUR_VAPID_KEY_HERE';
 
 /**
- * Compute the service worker URL according to PUBLIC_URL so it works on GitHub Pages
- * (the app may be served under a repo path like /testfullchat).
+ * Compute service worker URL relative to PUBLIC_URL / base path.
+ * This makes registration work on GitHub Pages repos served from a path.
  */
 function getServiceWorkerURL() {
   try {
-    // process.env.PUBLIC_URL will be substituted at build time (CRA). If not available, fallback to empty.
-    const base = (typeof process !== 'undefined' && process.env && process.env.PUBLIC_URL) ? process.env.PUBLIC_URL : (window && window.PUBLIC_URL ? window.PUBLIC_URL : "");
-    // ensure leading slash if base not empty and doesn't already start with '/'
-    if (base && base.charAt(0) !== "/") {
-      return `/${base.replace(/\/$/, "")}/firebase-messaging-sw.js`;
-    }
-    return `${base}/firebase-messaging-sw.js`.replace(/\/\/+/g, '/');
+    const base = (typeof process !== 'undefined' && process.env && process.env.PUBLIC_URL)
+      ? process.env.PUBLIC_URL
+      : (typeof window !== 'undefined' && window.PUBLIC_URL ? window.PUBLIC_URL : "");
+    if (!base) return '/firebase-messaging-sw.js';
+    // ensure no trailing slash
+    const trimmed = base.replace(/\/$/, '');
+    return `${trimmed}/firebase-messaging-sw.js`.replace(/\/\/+/g, '/');
   } catch (err) {
     return '/firebase-messaging-sw.js';
   }
 }
 
 /**
- * Request/obtain an FCM token and return it.
- * - registers the service worker at PUBLIC_URL/firebase-messaging-sw.js
+ * Try to obtain FCM token in a safe way:
+ * - registers service worker (PUBLIC_URL-aware)
  * - requests Notification permission if needed
- * - returns the token string or null if couldn't get one
- *
- * This function is defensive and logs errors instead of letting promises reject unhandled.
+ * - dynamically imports firebase/messaging only when needed
+ * - returns token string or null; never throws unhandled rejections
  */
 export async function obtainFcmToken() {
-  if (!messaging) {
-    console.debug("FCM: messaging not available in this environment.");
+  // feature checks first
+  if (typeof window === 'undefined') return null;
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+    // environment doesn't support web push (e.g., old browsers)
     return null;
   }
 
-  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
-    console.debug("FCM: serviceWorker or PushManager not supported by browser.");
-    return null;
-  }
-
-  // register service worker using PUBLIC_URL-aware path
+  // register service worker (PUBLIC_URL-aware path)
   const swUrl = getServiceWorkerURL();
   try {
-    // register returns a ServiceWorkerRegistration
     await navigator.serviceWorker.register(swUrl);
-    console.debug("FCM: service worker registered at:", swUrl);
   } catch (err) {
-    console.warn("FCM: service worker registration failed for", swUrl, err && err.message);
-    // don't throw — gracefully fail
+    // service worker registration failed; bail out
+    console.warn('SW registration failed:', err && err.message ? err.message : err);
     return null;
   }
 
-  // request permission when in default state; if denied, bail
+  // request permission if needed
   try {
-    if (Notification.permission === "default") {
-      const permission = await Notification.requestPermission();
-      if (permission !== "granted") {
-        console.debug("FCM: Notification permission was not granted:", permission);
-        return null;
-      }
-    } else if (Notification.permission !== "granted") {
-      console.debug("FCM: Notification permission currently:", Notification.permission);
+    if (Notification.permission === 'default') {
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') return null;
+    } else if (Notification.permission !== 'granted') {
       return null;
     }
   } catch (err) {
-    console.warn("FCM: Notification.requestPermission() error:", err && err.message);
+    console.warn('Notification.requestPermission failed:', err && err.message ? err.message : err);
     return null;
   }
 
-  // obtain token
+  // dynamic import of messaging (avoids importing module in unsupported envs)
   try {
-    const currentToken = await getToken(messaging, { vapidKey: VAPID_KEY });
-    if (!currentToken) {
-      console.debug("FCM: getToken returned null/empty (maybe VAPID key incorrect or blocked).");
-      return null;
-    }
-    console.debug("FCM: obtained token (truncated):", currentToken && currentToken.substr ? currentToken.substr(0, 20) + "..." : currentToken);
-    return currentToken;
+    const messagingModule = await import('firebase/messaging');
+    const { getMessaging, getToken } = messagingModule;
+    const messaging = getMessaging(app);
+    const token = await getToken(messaging, { vapidKey: VAPID_KEY });
+    if (!token) return null;
+    return token;
   } catch (err) {
-    console.warn("FCM: getToken failed:", err && err.message);
+    // expected in unsupported browsers — log but don't throw
+    console.warn('obtainFcmToken: messaging getToken failed or unsupported:', err && err.message ? err.message : err);
     return null;
   }
 }
 
-export async function removeFcmToken(token) {
-  if (!messaging || !token) return;
+/**
+ * Remove FCM token (best-effort).
+ * Uses dynamic import to avoid errors in unsupported browsers.
+ */
+export async function removeFcmToken() {
+  if (typeof window === 'undefined') return;
   try {
-    await deleteToken(messaging);
+    const messagingModule = await import('firebase/messaging');
+    const { getMessaging, deleteToken } = messagingModule;
+    const messaging = getMessaging(app);
+    try {
+      await deleteToken(messaging);
+    } catch (err) {
+      // ignore
+    }
   } catch (err) {
-    console.warn("FCM: deleteToken failed:", err && err.message);
+    // ignore - not supported environment
   }
 }
 
+/**
+ * Handle foreground messages (in-app). Pass a handler(payload) that receives the message payload.
+ * Returns a function that unsubscribes (best-effort). If messaging not supported, returns a no-op.
+ */
 export function onForegroundMessage(handler) {
-  if (!messaging) {
-    return () => {};
-  }
+  if (typeof window === 'undefined') return () => {};
   try {
-    const unsubscribe = onMessage(messaging, (payload) => {
+    // dynamic import and attach
+    let unsub = null;
+    import('firebase/messaging').then((messagingModule) => {
       try {
-        handler(payload);
-      } catch (handlerErr) {
-        console.error("onForegroundMessage handler threw:", handlerErr);
-      }
-    });
-    return unsubscribe;
+        const { getMessaging, onMessage } = messagingModule;
+        const messaging = getMessaging(app);
+        unsub = onMessage(messaging, (payload) => {
+          try { handler(payload); } catch (e) {}
+        });
+      } catch (e) { /* ignore */ }
+    }).catch(() => { /* ignore */ });
+    return () => {
+      try { if (typeof unsub === 'function') unsub(); } catch (e) {}
+    };
   } catch (err) {
-    console.warn("onForegroundMessage setup failed:", err && err.message);
     return () => {};
   }
 }
