@@ -7,7 +7,7 @@ import { rtdb } from "./firebase";
 
 /** CONFIGURE THESE **/
 const ONESIGNAL_APP_ID = "065caa62-cfe3-4bcf-ac90-2fdf30c168d7"; // your OneSignal App ID
-const ONESIGNAL_REST_API_KEY = "<PUT_YOUR_ONESIGNAL_REST_API_KEY_HERE>"; // <<< PUT YOUR REST KEY HERE
+const ONESIGNAL_REST_API_KEY = "os_v2_app_azokuywp4nf47leqf7ptbqli26dxlfmbjiiecdvqvrc62vctjnia6o5fvgi5aa6ihkjep4u7q4mjk3ota5sayijzac2kh3v3alw6ody"; // <<< PUT YOUR REST KEY HERE
 
 async function sendNotificationToPlayerIds(playerIds = [], title = "", body = "", data = {}) {
   if (!playerIds || playerIds.length === 0) {
