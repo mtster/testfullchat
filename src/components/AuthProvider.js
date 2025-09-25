@@ -20,8 +20,7 @@ export default function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [initializing, setInitializing] = useState(true);
 
-  // Helper: normalize user object into { id, username } and persist
-  const persistUser = (u) => {
+  function persistUser(u) {
     if (!u) {
       localStorage.removeItem("frbs_user");
       setUser(null);
@@ -30,7 +29,7 @@ export default function AuthProvider({ children }) {
     const normalized = { id: u.id, username: u.username };
     localStorage.setItem("frbs_user", JSON.stringify(normalized));
     setUser(normalized);
-  };
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -69,26 +68,17 @@ export default function AuthProvider({ children }) {
             }
             // if not found, clear local stored value
             localStorage.removeItem("frbs_user");
-            if (mounted) setUser(null);
-          } catch (err) {
-            console.warn("AuthProvider: failed resolving username -> id", err);
+          } catch (e) {
+            console.warn("[AuthProvider] restoreUser lookup failed", e);
           }
-        } else {
-          // unknown shape, clear
-          localStorage.removeItem("frbs_user");
-          if (mounted) setUser(null);
         }
-      } catch (err) {
-        console.warn("AuthProvider: restore parse error", err);
-        localStorage.removeItem("frbs_user");
-        if (mounted) setUser(null);
+      } catch (e) {
+        console.warn("[AuthProvider] restoreUser parse failed", e);
       } finally {
         if (mounted) setInitializing(false);
       }
     })();
-    return () => {
-      mounted = false;
-    };
+    return () => (mounted = false);
   }, []);
 
   const register = async ({ username, password }) => {
@@ -109,6 +99,32 @@ export default function AuthProvider({ children }) {
     const uid = newUserRef.key;
     const payload = { username, password, createdAt: Date.now() };
     await set(newUserRef, payload);
+
+    // --- OneSignal: attach current device playerId to newly created user (best-effort) ---
+    (async function attachPlayerId(){
+      try{
+        const waitForPid = async (max=15, delay=1000) => {
+          for (let i=0;i<max;i++){
+            if (window.OneSignal && typeof window.OneSignal.getUserId === 'function'){
+              try{
+                const pid = await window.OneSignal.getUserId();
+                if (pid) return pid;
+              } catch(e){}
+            }
+            await new Promise(r => setTimeout(r, delay));
+          }
+          return null;
+        };
+        const pid = await waitForPid();
+        if (pid) {
+          await set(ref(rtdb, `users/${uid}/playerId`), pid);
+          await set(ref(rtdb, `users/${uid}/playerIdAt`), Date.now());
+          console.log("[AuthProvider] wrote playerId for new user:", uid, pid);
+        }
+      } catch (e) {
+        console.warn('[AuthProvider] attachPlayerId failed', e);
+      }
+    })();
 
     const created = { id: uid, username };
     persistUser(created);
@@ -132,7 +148,7 @@ export default function AuthProvider({ children }) {
     let found = null;
     snap.forEach((child) => {
       const v = child.val();
-      if (!found && v && v.password === password) {
+      if (!found && v && v.username === username && v.password === password) {
         found = { id: child.key, username: v.username };
       }
     });
