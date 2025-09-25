@@ -1,6 +1,10 @@
 import './index.css';
 
 
+// src/index.js  (add this near the other top-level imports)
+import "./onesignalRegister";
+
+
 
 
 
