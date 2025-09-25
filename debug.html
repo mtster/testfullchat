@@ -15,224 +15,207 @@
     iframe { width:100%; height:640px; border:1px solid rgba(255,255,255,0.04); border-radius:8px; display:block; background:white; }
     .row { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
     .pill { background:rgba(255,255,255,0.03); padding:6px 8px; border-radius:999px; font-size:13px; }
-    .ok { color:#7fe0a8; }
-    .bad { color:#ff8b8b; }
     .muted { color:#9fb0c3; font-size:13px; }
     button { background:#0b84ff; color:white; border:none; padding:8px 10px; border-radius:8px; cursor:pointer; }
-    small { color:#9fb0c3; }
   </style>
 </head>
 <body>
   <header>
-    <h1>Protocol Chat — Diagnostic page</h1>
-    <small>Use this to capture runtime errors, service worker and FCM status from the app iframe.</small>
+    <h1>Protocol Chat — Diagnostic page (v2)</h1>
+    <div style="font-size:13px; color:#9fb0c3; margin-top:6px;">Will fetch your site root and service worker, show headers and final URL, and then attempt to load the app into the iframe.</div>
   </header>
 
-  <div class="main">
-    <div class="left">
-      <div class="panel">
-        <div class="row">
-          <div class="pill">App iframe</div>
-          <div class="muted">The app will load below — interact with it on your phone as usual (login, open chat).</div>
-        </div>
-
-        <iframe id="appFrame" src="./" title="App iframe"></iframe>
-        <div style="margin-top:8px;">
-          <button id="refreshFrame">Reload frame</button>
-          <button id="clearLocal">Clear app localStorage in frame</button>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="row"><div class="pill">Captured errors</div></div>
-        <div id="errors"><pre>(no errors yet)</pre></div>
-      </div>
-
-      <div class="panel">
-        <div class="row"><div class="pill">Unhandled Rejections</div></div>
-        <div id="rejections"><pre>(no rejections yet)</pre></div>
-      </div>
-
-      <div class="panel">
-        <div class="row"><div class="pill">Service worker check</div></div>
-        <div id="swcheck"><pre>checking...</pre></div>
-      </div>
-
-      <div class="panel">
-        <div class="row"><div class="pill">Notifications & FCM</div></div>
-        <div id="notifinfo"><pre>waiting for app frame...</pre></div>
+  <div style="padding:12px;">
+    <div class="panel">
+      <div class="row"><div class="pill">Site fetch & headers</div></div>
+      <div id="fetchResult"><pre>waiting...</pre></div>
+      <div style="margin-top:8px;">
+        <button id="doFetch">Run fetch check & load iframe</button>
       </div>
     </div>
 
-    <div style="width:360px;">
-      <div class="panel">
-        <div class="row"><div class="pill">Quick instructions</div></div>
-        <ol style="padding-left:16px; margin:0;">
-          <li>Open this page in Safari on your iPhone.</li>
-          <li>Use the iframe app to <b>login</b> (same as you normally do).</li>
-          <li>Perform the actions: create/open chat, send message — any errors will appear here.</li>
-          <li>Copy the text contents of the <b>Captured errors</b> and <b>Unhandled Rejections</b> panels and paste them back to me.</li>
-        </ol>
-      </div>
+    <div class="panel">
+      <div class="row"><div class="pill">Service worker check</div></div>
+      <div id="swResult"><pre>waiting...</pre></div>
+    </div>
 
-      <div class="panel">
-        <div class="row"><div class="pill">Hints</div></div>
-        <div class="muted">
-          If Notifications permission doesn't show up: open the app in regular Safari (not Home Screen), grant permission there, then re-add to Home Screen. If you previously denied, go to Settings → Safari → Advanced → Website Data → search and remove site data for <code>mtster.github.io</code>.
-        </div>
+    <div class="panel">
+      <div class="row"><div class="pill">Iframe / App</div></div>
+      <div id="frameWrap">
+        <iframe id="appFrame" src="about:blank" title="App iframe"></iframe>
       </div>
+      <div style="margin-top:8px;">
+        <button id="reloadFrame">Reload iframe</button>
+        <button id="clearFrameLS">Clear iframe localStorage</button>
+      </div>
+      <div style="margin-top:10px;"><small class="muted">If the iframe fails to load, the fetch results above will show why (redirect URL, headers).</small></div>
+    </div>
 
-      <div class="panel">
-        <div class="row"><div class="pill">Share results</div></div>
-        <div class="muted">
-          After you get results, copy the <b>errors</b>, <b>rejections</b>, the <b>Service worker check</b> output, and the <b>Notifications & FCM</b> output and paste them in your reply. I will parse them and give direct file edits.
-        </div>
-        <div style="margin-top:8px;"><small>Created to avoid needing desktop devtools.</small></div>
+    <div class="panel">
+      <div class="row"><div class="pill">Captured errors & promise rejections</div></div>
+      <div id="errors"><pre>(none yet)</pre></div>
+    </div>
+
+    <div class="panel">
+      <div class="row"><div class="pill">Notifications & FCM quick status</div></div>
+      <div id="notifs"><pre>waiting for iframe...</pre></div>
+    </div>
+
+    <div style="margin-top:12px;" class="panel">
+      <div style="font-size:13px;" class="muted">
+        Steps: Tap "Run fetch check & load iframe". After the iframe appears, login and use the app. Then paste here the <b>fetch result</b>, <b>service worker check</b>, <b>errors</b> and <b>Notifications & FCM</b> panels.
       </div>
     </div>
   </div>
 
-  <script>
-    (function(){
-      const iframe = document.getElementById('appFrame');
-      const errorsEl = document.getElementById('errors');
-      const rejEl = document.getElementById('rejections');
-      const swEl = document.getElementById('swcheck');
-      const notifEl = document.getElementById('notifinfo');
-      const refreshBtn = document.getElementById('refreshFrame');
-      const clearLocalBtn = document.getElementById('clearLocal');
+<script>
+(async function(){
+  // compute base path (repo path), e.g. /testfullchat (we are in that folder)
+  const basePath = (function(){
+    const p = location.pathname.replace(/\\/debug.html$/, '').replace(/\\/$/, '');
+    return p || '';
+  })();
 
-      function appendPre(el, text) {
-        el.innerHTML = '<pre>' + (text || '') + '</pre>';
+  const appUrl = location.origin + (basePath ? basePath + '/' : '/');
+  const swUrl = location.origin + (basePath ? basePath + '/firebase-messaging-sw.js' : '/firebase-messaging-sw.js');
+  const fetchEl = document.getElementById('fetchResult');
+  const swEl = document.getElementById('swResult');
+  const iframe = document.getElementById('appFrame');
+  const errorsEl = document.getElementById('errors');
+  const notifsEl = document.getElementById('notifs');
+  const doFetchBtn = document.getElementById('doFetch');
+  const reloadFrameBtn = document.getElementById('reloadFrame');
+  const clearLSBtn = document.getElementById('clearFrameLS');
+
+  function show(el, text) { el.innerHTML = '<pre>' + (text || '') + '</pre>'; }
+
+  async function runChecks() {
+    show(fetchEl, 'fetching ' + appUrl + ' ...');
+    try {
+      const r = await fetch(appUrl, { cache: 'no-cache', redirect: 'follow' });
+      const ct = r.headers.get('content-type') || '';
+      const xfo = r.headers.get('x-frame-options') || '(none)';
+      const csp = r.headers.get('content-security-policy') || '(none)';
+      const fa = r.headers.get('feature-policy') || r.headers.get('permissions-policy') || '(none)';
+      const finalURL = r.url || '(none)';
+      const status = r.status;
+      const text = await r.text().then(t => t.slice(0, 2000)).catch(()=>'(no body)');
+      show(fetchEl, [
+        'Fetch OK. status: ' + status,
+        'Final URL: ' + finalURL,
+        'Content-Type: ' + ct,
+        'X-Frame-Options: ' + xfo,
+        'Content-Security-Policy: ' + csp,
+        'Feature/Permissions-Policy: ' + fa,
+        '',
+        'First 2000 chars of response body (for inspection):',
+        '-------------------------------------------------',
+        text
+      ].join('\\n'));
+      // service worker check
+      try {
+        const rsw = await fetch(swUrl, { cache:'no-cache' });
+        const sct = rsw.headers.get('content-type') || '';
+        show(swEl, `SW fetch status: ${rsw.status}\\nSW final URL: ${rsw.url}\\nSW content-type: ${sct}`);
+      } catch (err) {
+        show(swEl, 'SW fetch failed: ' + (err && err.message));
       }
 
-      function addLine(el, text) {
-        const p = document.createElement('pre');
-        p.textContent = text;
-        el.appendChild(p);
-      }
+      // If finalURL looks okay (same as appUrl or same origin), try to load iframe.
+      // But if finalURL ends with firebase-messaging-sw.js or content-type is javascript or not html, still load iframe to confirm behavior.
+      iframe.src = appUrl;
+      iframe.onload = () => {
+        show(errorsEl, '(no errors yet)');
+        show(notifsEl, 'iframe loaded. Interact with app (login, open chat). This panel will poll for Notification.permission and localStorage.user every 2s.');
+        attachIframeListeners();
+      };
+      iframe.onerror = (ev) => {
+        show(errorsEl, 'iframe failed to load (error event). You may have frame-ancestors or X-Frame-Options blocking embedding.');
+      };
+    } catch (err) {
+      show(fetchEl, 'Fetch failed: ' + (err && err.message));
+    }
+  }
 
-      // When iframe loads, attach event listeners to its window (same origin)
-      iframe.addEventListener('load', () => {
+  async function attachIframeListeners() {
+    try {
+      const w = iframe.contentWindow;
+      // capture errors & rejections
+      w.addEventListener('error', function(ev){
+        const msg = [
+          'Message: ' + (ev && ev.message),
+          'Source: ' + (ev && ev.filename) + ':' + (ev && ev.lineno) + ':' + (ev && ev.colno),
+          'Error object: ' + (ev && ev.error && ev.error.stack ? ev.error.stack : JSON.stringify(ev.error || 'no stack'))
+        ].join('\\n');
+        show(errorsEl, msg);
+      });
+      w.addEventListener('unhandledrejection', function(ev){
+        let reason = ev && ev.reason;
+        let text = 'UnhandledRejection: ';
+        if (!reason) text += '(no reason)';
+        else if (reason.stack) text += reason.stack;
+        else if (typeof reason === 'object') text += JSON.stringify(reason);
+        else text += String(reason);
+        show(errorsEl, text);
+      });
+
+      // poll Notification.permission and localStorage.user and fcmTokens existence
+      const dbOrigin = 'https://protocol-chat-b6120-default-rtdb.europe-west1.firebasedatabase.app';
+      const poll = setInterval(async () => {
         try {
-          const w = iframe.contentWindow;
-          // clear previous displays
-          appendPre(errorsEl, '(no errors yet)');
-          appendPre(rejEl, '(no rejections yet)');
-
-          // capture synchronous errors from iframe
-          w.addEventListener('error', (ev) => {
-            const msg = [
-              'Message: ' + (ev && ev.message),
-              'Source: ' + (ev && ev.filename) + ':' + (ev && ev.lineno) + ':' + (ev && ev.colno),
-              'Error object: ' + (ev && ev.error && ev.error.stack ? ev.error.stack : JSON.stringify(ev.error || 'no stack'))
-            ].join('\\n');
-            appendPre(errorsEl, msg);
-          });
-
-          // capture unhandled promise rejections in iframe
-          w.addEventListener('unhandledrejection', (ev) => {
-            let reason = ev && ev.reason;
-            let text = 'UnhandledRejection: ';
-            if (!reason) text += '(no reason)';
-            else if (reason.stack) text += reason.stack;
-            else if (typeof reason === 'object') text += JSON.stringify(reason);
-            else text += String(reason);
-            appendPre(rejEl, text);
-          });
-
-          // frequently update notification permission and localStorage user and DB check
-          const basePath = (function(){
-            // compute base path (like /testfullchat)
-            const p = window.location.pathname.replace(/\\/debug.html$/, '');
-            return p === '' ? '' : p.replace(/\\/$/, '');
-          })();
-          const swUrl = window.location.origin + basePath + '/firebase-messaging-sw.js';
-          const dbOrigin = 'https://protocol-chat-b6120-default-rtdb.europe-west1.firebasedatabase.app';
-
-          // check SW reachable
-          (async function checkSW(){
+          let perm = 'n/a';
+          try { perm = w.Notification && w.Notification.permission ? w.Notification.permission : 'n/a'; } catch(e){ perm = 'error'; }
+          let user = null;
+          try {
+            const raw = w.localStorage.getItem('user');
+            user = raw ? JSON.parse(raw) : null;
+          } catch(e) { user = null; }
+          let tokenLine = 'no logged user found in localStorage';
+          if (user && user.id) {
             try {
-              const r = await fetch(swUrl, { method:'GET', cache:'no-cache' });
-              appendPre(swEl, 'fetch ' + swUrl + ' -> status: ' + r.status + '\\ncontent-type: ' + (r.headers.get('content-type') || 'n/a'));
-            } catch (err) {
-              appendPre(swEl, 'fetch failed: ' + (err && err.message));
-            }
-          })();
-
-          // Poll status every 2s for live updates
-          const poll = setInterval(async () => {
-            try {
-              // Notification.permission inside iframe
-              let perm = 'n/a';
-              try { perm = w.Notification && w.Notification.permission ? w.Notification.permission : 'n/a'; } catch(e){ perm = 'error'; }
-              // localStorage user
-              let user = null;
-              try {
-                const raw = w.localStorage.getItem('user');
-                user = raw ? JSON.parse(raw) : null;
-              } catch(e) {
-                user = null;
-              }
-              let userLine = 'localStorage.user: ' + (user ? JSON.stringify(user) : '(null)');
-
-              // if we have user.id then check fcmTokens for that uid
-              let tokenLine = 'fcmTokens check: unknown';
-              if (user && user.id) {
-                try {
-                  const tokenUrl = dbOrigin + '/fcmTokens/' + encodeURIComponent(user.id) + '.json';
-                  const r = await fetch(tokenUrl, {cache:'no-cache'});
-                  if (r.ok) {
-                    const j = await r.json();
-                    tokenLine = 'fcmTokens/' + user.id + ': ' + (j ? JSON.stringify(j) : '(no tokens)');
-                  } else {
-                    tokenLine = 'fcmTokens fetch status ' + r.status;
-                  }
-                } catch (err) {
-                  tokenLine = 'fcmTokens fetch failed: ' + (err && err.message);
-                }
+              const tokenUrl = dbOrigin + '/fcmTokens/' + encodeURIComponent(user.id) + '.json';
+              const r = await fetch(tokenUrl, { cache:'no-cache' });
+              if (r.ok) {
+                const j = await r.json();
+                tokenLine = 'fcmTokens/' + user.id + ': ' + (j ? JSON.stringify(j) : '(no tokens)');
               } else {
-                tokenLine = 'no logged user found in localStorage';
+                tokenLine = 'fcmTokens fetch status ' + r.status;
               }
-
-              appendPre(notifEl, 'Notification.permission (in iframe): ' + perm + '\\n' + userLine + '\\n' + tokenLine);
             } catch (err) {
-              appendPre(notifEl, 'polling error: ' + (err && err.message));
+              tokenLine = 'fcmTokens fetch failed: ' + (err && err.message);
             }
-          }, 2000);
-
-          // store poll so we might cancel later (not strictly necessary)
-          iframe._poller = poll;
-
+          }
+          show(notifsEl, 'Notification.permission (in iframe): ' + perm + '\\nlocalStorage.user: ' + (user ? JSON.stringify(user) : '(null)') + '\\n' + tokenLine);
         } catch (err) {
-          appendPre(errorsEl, 'iframe attach error: ' + (err && err.message));
+          show(notifsEl, 'Polling error: ' + (err && err.message));
         }
-      });
+      }, 2000);
 
-      // buttons
-      refreshBtn.addEventListener('click', () => {
-        try {
-          if (iframe._poller) clearInterval(iframe._poller);
-        } catch (_) {}
-        iframe.contentWindow.location.reload();
-      });
+      iframe._poller = poll;
+    } catch (err) {
+      show(errorsEl, 'attachIframeListeners failed: ' + (err && err.message));
+    }
+  }
 
-      clearLocalBtn.addEventListener('click', () => {
-        try {
-          const w = iframe.contentWindow;
-          w.localStorage.clear();
-          appendPre(notifEl, 'Cleared iframe localStorage. Reload iframe and login again.');
-        } catch (err) {
-          appendPre(errorsEl, 'clearLocal error: ' + (err && err.message));
-        }
-      });
+  doFetchBtn.addEventListener('click', runChecks);
+  reloadFrameBtn.addEventListener('click', () => {
+    try {
+      if (iframe._poller) clearInterval(iframe._poller);
+    } catch(_) {}
+    iframe.contentWindow.location.reload();
+  });
+  clearLSBtn.addEventListener('click', () => {
+    try {
+      iframe.contentWindow.localStorage.clear();
+      show(notifsEl, 'Cleared iframe localStorage. Reload iframe and login again.');
+    } catch (err) {
+      show(errorsEl, 'clear iframe localStorage failed: ' + (err && err.message));
+    }
+  });
 
-      // initial UI text
-      appendPre(errorsEl, "(no errors yet)");
-      appendPre(rejEl, "(no rejections yet)");
-      appendPre(swEl, "waiting for iframe load...");
-      appendPre(notifEl, "waiting for iframe load...");
-    })();
-  </script>
+  // auto-run on open
+  // setTimeout(runChecks, 150);
+})();
+</script>
 </body>
 </html>
