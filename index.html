@@ -2,4 +2,153 @@
   
   <base href="/testfullchat/">
 
-  <meta charset="utf-8"/><link rel="manifest" href="/testfullchat/manifest.json?v=3"/><meta name="theme-color" content="#0f1720"/><meta name="apple-mobile-web-app-capable" content="yes"/><meta name="apple-mobile-web-app-title" content="Protocol"/><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/><meta name="description" content="Protocol — a lightweight private chat"/><link rel="icon" type="image/png" sizes="192x192" href="/testfullchat/icons/icon-192.png"/><link rel="icon" type="image/png" sizes="512x512" href="/testfullchat/icons/icon-512.png"/><link rel="apple-touch-icon" href="/testfullchat/icons/icon-192.png"/><link rel="apple-touch-icon" sizes="180x180" href="/testfullchat/icons/icon-192.png"/><link rel="apple-touch-icon" sizes="512x512" href="/testfullchat/icons/icon-512.png"/><title>Protocol</title><script defer="defer" src="/testfullchat/static/js/main.c35cfae4.js"></script><link href="/testfullchat/static/css/main.b3ff2579.css" rel="stylesheet"></head><body><noscript>You need to enable JavaScript to run this app.</noscript><div id="root"></div></body></html>
+  <meta charset="utf-8"/><link rel="manifest" href="/testfullchat/manifest.json?v=3"/><meta name="theme-color" content="#0f1720"/><meta name="apple-mobile-web-app-capable" content="yes"/><meta name="apple-mobile-web-app-title" content="Protocol"/><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/><meta name="description" content="Protocol — a lightweight private chat"/><link rel="icon" type="image/png" sizes="192x192" href="/testfullchat/icons/icon-192.png"/><link rel="icon" type="image/png" sizes="512x512" href="/testfullchat/icons/icon-512.png"/><link rel="apple-touch-icon" href="/testfullchat/icons/icon-192.png"/><link rel="apple-touch-icon" sizes="180x180" href="/testfullchat/icons/icon-192.png"/><link rel="apple-touch-icon" sizes="512x512" href="/testfullchat/icons/icon-512.png"/><title>Protocol</title><script defer="defer" src="/testfullchat/static/js/main.c35cfae4.js"></script><link href="/testfullchat/static/css/main.b3ff2579.css" rel="stylesheet"></head><body>
+
+    <!-- BEGIN TEMPORARY DIAGNOSTIC OVERLAY (REMOVE AFTER DEBUG) -->
+<style id="diag-style">
+  #diagOverlay{position:fixed;left:8px;right:8px;top:8px;z-index:999999;background:#071022cc;color:#e6eef8;border-radius:12px;padding:10px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial;font-size:13px;box-shadow:0 6px 30px rgba(0,0,0,0.6);}
+  #diagOverlay h3{margin:0 0 6px 0;font-size:14px}
+  #diagOverlay pre{white-space:pre-wrap;max-height:220px;overflow:auto;background:rgba(255,255,255,0.02);padding:8px;border-radius:8px;margin:6px 0}
+  #diagOverlay .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  #diagToggle{position:fixed;right:12px;bottom:12px;z-index:9999999;background:#0b84ff;color:#fff;border:none;padding:10px 12px;border-radius:999px;font-weight:600}
+  #diagOverlay a{color:#8fd7ff}
+  #diagOverlay button{background:#0b84ff;color:white;border:none;padding:6px 8px;border-radius:6px}
+</style>
+
+<div id="diagOverlay" role="status" aria-live="polite">
+  <h3>Runtime diagnostics (temporary)</h3>
+  <div class="row"><strong>Notification.permission:</strong> <span id="diag-notif">…</span></div>
+  <div class="row"><strong>localStorage.user:</strong> <span id="diag-user">…</span></div>
+  <div class="row"><strong>SW status:</strong> <span id="diag-sw">…</span></div>
+  <div class="row" style="margin-top:6px">
+    <button id="diag-refresh">Reload page</button>
+    <button id="diag-clear-ls">Clear localStorage</button>
+    <button id="diag-get-scripts">Check script assets</button>
+  </div>
+
+  <div style="margin-top:8px">
+    <div><strong>Errors & Rejections</strong></div>
+    <pre id="diag-errors">(no errors yet)</pre>
+  </div>
+
+  <div style="margin-top:8px">
+    <div><strong>Scripts found & fetch status</strong></div>
+    <pre id="diag-scripts">(not checked)</pre>
+  </div>
+
+  <div style="margin-top:8px">
+    <div><strong>Notes</strong></div>
+    <div style="color:#9fb0c3;font-size:12px">After you reproduce the issue (login / open chat) copy the contents of the <em>Errors & Rejections</em> and <em>Scripts found</em> boxes and paste them here.</div>
+  </div>
+</div>
+<button id="diagToggle" aria-label="Toggle diagnostics">Diag</button>
+
+<script>
+(function(){
+  // helper
+  function $(id){return document.getElementById(id);}
+  const errBox = $('diag-errors');
+  const scriptsBox = $('diag-scripts');
+  const notifSpan = $('diag-notif');
+  const userSpan = $('diag-user');
+  const swSpan = $('diag-sw');
+  const overlay = $('diagOverlay');
+  const toggle = $('diagToggle');
+
+  // toggle UI
+  toggle.addEventListener('click', () => {
+    overlay.style.display = overlay.style.display === 'none' ? 'block' : 'none';
+  });
+
+  // show basic info
+  function updateBasic() {
+    try {
+      notifSpan.textContent = (window.Notification && window.Notification.permission) ? window.Notification.permission : 'n/a';
+    } catch(e){ notifSpan.textContent = 'err'; }
+    try {
+      const raw = localStorage.getItem('user');
+      userSpan.textContent = raw ? raw : '(null)';
+    } catch(e) { userSpan.textContent = 'err'; }
+    // service worker state
+    try {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistration().then(reg => {
+          if (reg) {
+            swSpan.textContent = 'registered (scope: ' + (reg.scope || '') + ')';
+          } else {
+            swSpan.textContent = 'no registration';
+          }
+        }).catch(err => { swSpan.textContent = 'getRegistration error'; });
+      } else {
+        swSpan.textContent = 'SW not supported';
+      }
+    } catch(e) { swSpan.textContent = 'err'; }
+  }
+  updateBasic();
+  setInterval(updateBasic, 2000);
+
+  // capture errors and unhandled rejections
+  function appendError(text) {
+    const now = new Date().toLocaleTimeString();
+    errBox.textContent = now + ' — ' + text + '\\n\\n' + errBox.textContent;
+  }
+  window.addEventListener('error', function(ev){
+    const msg = (ev && ev.message) ? ev.message : JSON.stringify(ev);
+    appendError('Error: ' + msg + ' (source: ' + (ev.filename || '') + ':' + (ev.lineno||'') + ')');
+  });
+  window.addEventListener('unhandledrejection', function(ev){
+    let reason = ev && ev.reason;
+    let text = 'UnhandledRejection: ';
+    if (!reason) text += '(no reason)';
+    else if (reason.stack) text += reason.stack;
+    else if (typeof reason === 'object') text += JSON.stringify(reason);
+    else text += String(reason);
+    appendError(text);
+  });
+
+  // buttons
+  $('diag-refresh').addEventListener('click', function(){
+    location.reload();
+  });
+  $('diag-clear-ls').addEventListener('click', function(){
+    try { localStorage.clear(); appendError('Cleared localStorage'); } catch(e) { appendError('clear localStorage failed'); }
+  });
+
+  // script asset check
+  $('diag-get-scripts').addEventListener('click', async function(){
+    scriptsBox.textContent = 'Checking scripts...';
+    try {
+      const scripts = Array.from(document.getElementsByTagName('script')).map(s => s.src || '(inline)');
+      let out = '';
+      for (const s of scripts) {
+        out += 'SCRIPT: ' + s + '\\n';
+        if (!s || s === '(inline)') { out += '  (inline script)\\n\\n'; continue; }
+        try {
+          // try to fetch the script
+          const url = new URL(s, location.href).href;
+          const r = await fetch(url, {cache:'no-cache'});
+          out += '  fetch status: ' + r.status + ' content-type: ' + (r.headers.get('content-type') || 'n/a') + '\\n';
+          // if text is small, show small snippet
+          try {
+            const txt = await r.text();
+            out += '  snippet: ' + txt.slice(0,160).replace(/\\n/g,' ') + '\\n';
+          } catch(e){}
+        } catch(fetchErr) {
+          out += '  fetch failed: ' + (fetchErr && fetchErr.message) + '\\n';
+        }
+        out += '\\n';
+      }
+      scriptsBox.textContent = out;
+    } catch(e) {
+      scriptsBox.textContent = 'script check failed: ' + (e && e.message);
+    }
+  });
+
+  // show overlay by default
+  overlay.style.display = 'block';
+})();
+</script>
+<!-- END TEMPORARY DIAGNOSTIC OVERLAY -->
+
+    
+    <noscript>You need to enable JavaScript to run this app.</noscript><div id="root"></div></body></html>
