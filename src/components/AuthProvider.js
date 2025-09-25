@@ -10,7 +10,6 @@ import {
   orderByChild,
   equalTo,
   onDisconnect,
-  onValue,
 } from "firebase/database";
 import { obtainFcmToken, removeFcmToken, onForegroundMessage } from "../firebase";
 
@@ -41,31 +40,35 @@ export default function AuthProvider({ children }) {
     setInitializing(false);
   }, []);
 
-  // presence & FCM token management
   useEffect(() => {
     let presenceRef = null;
-    let disconnected = null;
+    let disconnecter = null;
     let currentToken = null;
 
     async function setupPresenceAndFcm(u) {
-      if (!u) return;
-      // presence
+      if (!u || !u.id) return;
+
+      // presence: set to true and set an onDisconnect removal
       try {
         presenceRef = ref(rtdb, `presence/${u.id}`);
         await set(presenceRef, true);
-        // ensure presence is removed on disconnect
-        disconnected = onDisconnect(presenceRef);
-        disconnected.remove();
+        disconnecter = onDisconnect(presenceRef);
+        // schedule removal on disconnect
+        try {
+          disconnecter.remove();
+        } catch (err) {
+          console.warn("onDisconnect.remove() failed:", err && err.message);
+        }
       } catch (err) {
-        console.warn("presence setup failed", err);
+        console.warn("presence setup failed:", err && err.message);
       }
 
-      // keep presence updated when page unloads/visibility changes
+      // update presence on visibility changes
       const setAway = () => {
-        try { set(presenceRef, false); } catch(_) {}
+        try { set(ref(rtdb, `presence/${u.id}`), false); } catch(_) {}
       };
       const setHere = () => {
-        try { set(presenceRef, true); } catch(_) {}
+        try { set(ref(rtdb, `presence/${u.id}`), true); } catch(_) {}
       };
       window.addEventListener("beforeunload", setAway);
       document.addEventListener("visibilitychange", () => {
@@ -73,29 +76,32 @@ export default function AuthProvider({ children }) {
         else setAway();
       });
 
-      // FCM token obtain
+      // try to obtain FCM token and store it
       try {
         const token = await obtainFcmToken();
         if (token) {
           currentToken = token;
           try {
-            const tokenRef = ref(rtdb, `fcmTokens/${u.id}/${token}`);
-            await set(tokenRef, true);
+            await set(ref(rtdb, `fcmTokens/${u.id}/${token}`), true);
+            console.debug("Stored fcm token for user:", u.id);
           } catch (err) {
-            console.warn("storing fcm token failed", err);
+            console.warn("storing fcm token failed:", err && err.message);
           }
+        } else {
+          console.debug("No FCM token obtained or permission denied.");
         }
       } catch (err) {
-        console.warn("obtainFcmToken failed", err);
+        console.warn("obtainFcmToken error:", err && err.message);
       }
 
-      // foreground message handling: we don't show native notification while app is visible.
+      // foreground messages: we intentionally ignore showing native notifications while app visible
       try {
         onForegroundMessage((payload) => {
-          // ignore by default (the app is open). You can add in-app UI alerts here if desired.
           console.debug("Foreground push received (ignored)", payload);
         });
-      } catch (err) {}
+      } catch (err) {
+        // no-op
+      }
     }
 
     if (user) {
@@ -103,13 +109,20 @@ export default function AuthProvider({ children }) {
     }
 
     return () => {
-      // cleanup on logout / unmount
-      if (presenceRef && user) {
-        try { set(ref(rtdb, `presence/${user.id}`), false); } catch(_) {}
-      }
-      if (currentToken && user) {
-        try { removeFcmToken(currentToken); } catch(_) {}
-        try { set(ref(rtdb, `fcmTokens/${user.id}/${currentToken}`), null); } catch(_) {}
+      // cleanup
+      try {
+        if (user && user.id) {
+          set(ref(rtdb, `presence/${user.id}`), false).catch(()=>{});
+        }
+      } catch (err) {}
+
+      if (currentToken && user && user.id) {
+        try {
+          removeFcmToken(currentToken).catch(()=>{});
+        } catch (err) {}
+        try {
+          set(ref(rtdb, `fcmTokens/${user.id}/${currentToken}`), null).catch(()=>{});
+        } catch (err) {}
       }
     };
   }, [user]);
@@ -143,11 +156,9 @@ export default function AuthProvider({ children }) {
   };
 
   const logout = async () => {
-    // remove presence and FCM tokens for this user
     try {
       if (user && user.id) {
         await set(ref(rtdb, `presence/${user.id}`), false);
-        // remove all fcm tokens under this user (client-side best-effort)
         const tokensSnap = await get(ref(rtdb, `fcmTokens/${user.id}`));
         const tokens = (tokensSnap && tokensSnap.val()) || {};
         for (const t of Object.keys(tokens)) {
@@ -155,7 +166,7 @@ export default function AuthProvider({ children }) {
         }
       }
     } catch (err) {
-      console.warn("logout cleanup failed", err);
+      console.warn("logout cleanup failed:", err && err.message);
     }
     persistUser(null);
     setUser(null);
