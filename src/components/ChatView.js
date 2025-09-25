@@ -6,137 +6,134 @@ import { rtdb } from "../firebase";
 import { ref, onValue, push, set, get } from "firebase/database";
 import "../index.css";
 
-// NOTIFICATION IMPORT (UPDATED)
 import { notifyChatRecipients } from "../notifyPush";
 
-/* same message path heuristics you had before */
+/**
+ * Message path heuristics (will pick the first existing path)
+ */
 const POSSIBLE_MESSAGE_PATHS = [
   (chatId) => `messages/${chatId}`,
   (chatId) => `chatMessages/${chatId}`,
   (chatId) => `chats/${chatId}/messages`,
-  (chatId) => `rooms/${chatId}/messages`,
+  (chatId) => `rooms/${chatId}/messages`
 ];
 
 export default function ChatView() {
   const { chatId } = useParams();
-  const { user } = useAuth();
   const navigate = useNavigate();
-  const [chat, setChat] = useState(null);
+  const { user } = useAuth();
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
-  const [error, setError] = useState(null);
-  const refScroll = useRef();
+  const [chatMeta, setChatMeta] = useState({ name: '' });
+  const messagesRefRef = useRef(null);
 
   useEffect(() => {
-    if (!chatId) return;
-    // Attempt various message paths
-    let unsub;
-    (async function subscribe() {
-      for (const p of POSSIBLE_MESSAGE_PATHS) {
-        try {
-          const r = ref(rtdb, p(chatId));
-          unsub = onValue(r, (snapshot) => {
-            const val = snapshot.val() || {};
-            const items = [];
-            Object.keys(val).forEach((k) => items.push({ id: k, ...val[k] }));
-            items.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-            setMessages(items);
-          });
-          // we set unsub reference; keep listening to first one that succeeds
-          break;
-        } catch (e) {
-          // try next path
-        }
-      }
-    })();
+    let unsub = () => {};
+    let canceled = false;
 
-    // read chat meta if exists
-    (async function() {
+    async function findAndListen() {
+      if (!chatId) return;
+      // try to find a messages path that exists; prefer first that exists, else use default messages/{chatId}
+      let chosenPath = null;
+      for (const fn of POSSIBLE_MESSAGE_PATHS) {
+        try {
+          const p = fn(chatId);
+          const snap = await get(ref(rtdb, p));
+          if (snap && snap.exists()) {
+            chosenPath = p;
+            break;
+          }
+        } catch (e) {}
+      }
+      if (!chosenPath) chosenPath = POSSIBLE_MESSAGE_PATHS[0](chatId);
+
+      messagesRefRef.current = ref(rtdb, chosenPath);
+      onValue(messagesRefRef.current, (snapshot) => {
+        if (canceled) return;
+        const val = snapshot.val() || {};
+        const arr = Object.keys(val).map(k => {
+          const item = val[k];
+          return { id: k, ...item };
+        }).sort((a,b)=> (a.timestamp||0)-(b.timestamp||0));
+        setMessages(arr);
+      });
+
+      // also try to load chat meta if present at chats/{chatId}
       try {
-        const cRef = ref(rtdb, `chats/${chatId}`);
-        const snap = await get(cRef);
-        if (snap && snap.exists()) setChat(snap.val());
+        const metaSnap = await get(ref(rtdb, `chats/${chatId}`));
+        if (metaSnap && metaSnap.exists()) {
+          setChatMeta(metaSnap.val());
+        }
       } catch (e) {}
-    })();
+    }
+
+    findAndListen();
 
     return () => {
-      try { if (unsub) unsub(); } catch(e) {}
+      canceled = true;
+      try { if (messagesRefRef.current) messagesRefRef.current.off; } catch(e){}
+      unsub();
     };
   }, [chatId]);
 
   async function sendMessage(e) {
     e.preventDefault();
-    setError(null);
     if (!text || !text.trim()) return;
-    const txt = text.trim();
-    setText("");
-    try {
-      // try to find a place to write message (non-invasive)
-      let newRef;
-      for (const p of POSSIBLE_MESSAGE_PATHS) {
-        try {
-          const messagesRef = ref(rtdb, p(chatId));
-          newRef = push(messagesRef);
+    const msg = {
+      chatId,
+      senderId: user?.id || "anon",
+      senderName: user?.username || "Anonymous",
+      text: String(text).trim(),
+      timestamp: Date.now()
+    };
+
+    // determine where to write: try common paths in same order as listener
+    let writePath = null;
+    for (const fn of POSSIBLE_MESSAGE_PATHS) {
+      const p = fn(chatId);
+      try {
+        const snap = await get(ref(rtdb, p));
+        if (snap && snap.exists()) {
+          writePath = p;
           break;
-        } catch (e) {
-          // continue
         }
-      }
-      if (!newRef) throw new Error("No message path available");
+      } catch (e) {}
+    }
+    if (!writePath) writePath = POSSIBLE_MESSAGE_PATHS[0](chatId);
 
-      await set(newRef, {
-        senderId: user.id,
-        senderUsername: user.username || null,
-        message: txt,
-        timestamp: Date.now(),
-      });
-      // update chat metadata
+    try {
+      await push(ref(rtdb, writePath), msg);
+      // Fire-and-forget notify; do not await or block UI
       try {
-        await set(ref(rtdb, `chats/${chatId}/lastMessage`), txt);
-        await set(ref(rtdb, `chats/${chatId}/lastMessageAt`), Date.now());
-      } catch (metaErr) {
-        console.warn("Failed to update chat metadata", metaErr);
-      }
-
-      // NOTIFICATION: best-effort, non-blocking call to send push to other participants
-      // This will not affect sending flow if it fails.
-      try {
-        notifyChatRecipients(
-          chatId,
-          { text: txt, senderName: user.username || user.id },
-          user.id
-        )
-          .then((res) => console.log("[ChatView] notifyChatRecipients result:", res))
-          .catch((err) => console.warn("notifyChatRecipients error:", err));
-      } catch (notifyErr) {
-        console.warn("notifyChatRecipients call failed:", notifyErr);
-      }
-
-    } catch (err) {
-      console.error("sendMessage error:", err);
-      setError("Failed to send message");
+        notifyChatRecipients(chatId, msg, msg.senderId);
+      } catch (e) {}
+    } catch (e) {
+      console.error("sendMessage failed", e);
+    } finally {
+      setText("");
     }
   }
 
-  if (!user) return null;
-  if (!chat) return <div style={{ padding: 12 }}>Select a chat</div>;
-
   return (
-    <div className="chat-view">
-      <div className="chat-header">
-        <h3>{chat.chatName || "Chat"}</h3>
+    <div className="chat-view" style={{ padding: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <button className="btn" onClick={() => navigate(-1)}>Back</button>
+        <div style={{ fontWeight: 700 }}>{chatMeta.name || `Chat ${chatId}`}</div>
       </div>
 
-      <div className="messages" ref={refScroll}>
-        {messages.map((m) => (
-          <div key={m.id} className={`message ${m.senderId === user.id ? "mine" : ""}`}>
-            <div className="meta">
-              <span className="sender">{m.senderUsername || m.senderId}</span>
-              <span className="time">{m.timestamp ? new Date(m.timestamp).toLocaleTimeString() : ""}</span>
+      <div style={{ marginTop: 12 }}>
+        <div className="messages">
+          {messages.map(m => (
+            <div key={m.id} className={"message " + (m.senderId === (user && user.id) ? "me" : "them")}>
+              <div className="message-sender">{m.senderName || m.senderId}</div>
+              <div className="message-text">{m.text || m.message}</div>
+              <div className="message-time" style={{ fontSize: 11, color: "var(--muted)" }}>
+                {m.timestamp ? new Date(m.timestamp).toLocaleString() : ""}
+              </div>
             </div>
-            <div className="body">{m.message}</div>
-          </div>
-        ))}
+          ))}
+          {messages.length === 0 && <div style={{ color: "var(--muted)", padding: 12 }}>No messages yet</div>}
+        </div>
       </div>
 
       <form onSubmit={sendMessage} className="message-input-wrap" style={{ alignItems: "center" }}>
