@@ -1,0 +1,374 @@
+/* src/index.css - Protocol theme (safe-area & responsive fixes) */
+
+/* Theme variables */
+:root {
+  --bg: #0b0f14;            /* page background */
+  --panel: #0f1720;         /* panels */
+  --muted-panel: #13171b;   /* slightly lighter panel */
+  --accent: #6ee7b7;        /* green accent */
+  --text: #e6eef6;          /* primary text */
+  --muted: #9aa7b3;         /* muted text */
+  --bubble-me: #173b2b;     /* outgoing bubble */
+  --bubble-other: #111418;  /* incoming bubble */
+  --danger: #ff7a7a;
+  --glass: rgba(255,255,255,0.03);
+  --radius: 10px;
+  --container-max: 1100px;
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+}
+
+/* Safe area env vars (with fallback) */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+}
+
+/* Page base - ensure dark background covers entire viewport (no white gaps) */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: linear-gradient(180deg, var(--bg), #071018);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+}
+
+/* Prevent iOS zoom on inputs */
+input, textarea, button, select {
+  font-size: 16px;
+  font-family: inherit;
+}
+
+/* Apply safe area padding at the top and bottom at the page root */
+body {
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
+  box-sizing: border-box;
+}
+
+/* App container */
+.app-wrap {
+  max-width: var(--container-max);
+  margin: 18px auto;
+  padding: 12px;
+  box-sizing: border-box;
+  min-height: calc(100vh - var(--safe-top) - var(--safe-bottom));
+  /* ensure background is consistent */
+  background: transparent;
+}
+
+/* Topbar/header - keep normal height, do NOT add extra safe-top padding here */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  padding: 12px 16px; /* keep fixed header height */
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(2,6,23,0.6);
+  position: relative;
+  z-index: 20;
+}
+
+.app-title {
+  display:flex;
+  align-items:center;
+  gap:12px;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: var(--text);
+}
+
+/* small logo sizing */
+.app-title img {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+/* Buttons */
+.btn {
+  background: var(--accent);
+  color: #022413;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(14, 95, 69, 0.08);
+  min-height: 36px;
+}
+.btn.secondary {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid rgba(255,255,255,0.03);
+}
+.btn.logout {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid rgba(255,255,255,0.04);
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+
+/* Layout */
+.layout {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 16px;
+  margin-top: 14px;
+}
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+}
+
+/* Sidebar */
+.sidebar {
+  background: linear-gradient(180deg, var(--panel), var(--muted-panel));
+  padding: 12px;
+  border-radius: 12px;
+  min-height: calc(60vh - var(--safe-bottom));
+}
+
+/* Chat list entries */
+.chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.chat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.015));
+  transition: transform .12s ease, box-shadow .12s ease;
+  cursor: pointer;
+  width: calc(100% - 8px);
+  box-sizing: border-box;
+}
+.chat-item:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 30px rgba(2,6,23,0.6);
+}
+.chat-item .name {
+  font-weight: 700;
+  color: var(--text);
+  font-size: 15px;
+}
+.chat-item .meta {
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.chat-item .preview {
+  color: var(--muted);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Main panel */
+.panel {
+  background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.02));
+  padding: 12px;
+  border-radius: 12px;
+  min-height: calc(60vh - var(--safe-top) - var(--safe-bottom));
+  display:flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+/* Chat view */
+.chat-view {
+  display:flex;
+  flex-direction:column;
+  height: calc(100vh - 168px - var(--safe-top) - var(--safe-bottom));
+  gap: 12px;
+  padding-bottom: calc(8px + var(--safe-bottom));
+  box-sizing: border-box;
+}
+
+/* Chat header */
+.chat-header {
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+.chat-back {
+  width:36px;height:36px;
+  display:flex;align-items:center;justify-content:center;
+  border-radius:8px;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.03);
+  color: var(--text);
+  cursor:pointer;
+}
+
+/* Messages */
+.messages {
+  flex:1;
+  overflow:auto;
+  padding: 12px;
+  display:flex;
+  flex-direction:column;
+  gap: 10px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.005), rgba(255,255,255,0.01));
+  border-radius: 10px;
+}
+
+/* Message bubble */
+.message {
+  display:inline-block;
+  max-width: 76%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.3;
+  color: var(--text);
+  box-shadow: 0 6px 18px rgba(2,6,23,0.45);
+}
+.message.me {
+  background: linear-gradient(180deg, var(--bubble-me), rgba(17,18,20,0.03));
+  color: #dfffe9;
+  align-self: flex-end;
+  border-bottom-right-radius: 6px;
+}
+.message.other {
+  background: linear-gradient(180deg, var(--bubble-other), rgba(255,255,255,0.01));
+  color: var(--text);
+  align-self: flex-start;
+  border-bottom-left-radius: 6px;
+}
+.message .meta {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+/* Input area */
+.message-input-wrap {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  margin-top: auto;
+  background: linear-gradient(180deg, transparent, rgba(0,0,0,0.02));
+  padding-bottom: calc(8px + var(--safe-bottom)); /* respects iPhone home bar */
+  box-sizing: border-box;
+}
+
+.message-input {
+  flex: 1;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.03);
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  color: var(--text);
+  outline: none;
+  min-height: 44px;
+}
+
+/* Modal overlay */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5,8,10,0.6);
+  z-index: 60;
+}
+.modal {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 320px;
+  max-width: 720px;
+  width: calc(100% - 40px);
+  background: linear-gradient(180deg, #0f1418, #0b1115);
+  border-radius: 12px;
+  padding: 18px;
+  z-index: 70;
+  box-shadow: 0 25px 80px rgba(2,6,23,0.7);
+  color: var(--text);
+}
+
+/* Forms */
+.form-row {
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  margin-bottom: 6px;
+}
+.form-row label {
+  color: var(--muted);
+  font-size: 13px;
+}
+.form-row input {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.03);
+  padding: 10px 12px;
+  color: var(--text);
+  border-radius: 8px;
+  outline: none;
+}
+
+/* Helper */
+.help { font-size: 13px; color: var(--muted); }
+
+/* Fallback for browsers without env() */
+@supports(not (padding: env(safe-area-inset-top))) {
+  body { padding-top: 0; padding-bottom: 0; }
+  .app-wrap { padding-top: 12px; padding-bottom: 12px; }
+  .topbar { padding-top: 12px; }
+  .chat-view { padding-bottom: 8px; }
+  .message-input-wrap { padding-bottom: 8px; }
+}
+
+/* make sure the entire app never shows white behind (global) */
+html, body, #root, .app-wrap, .panel {
+  background-color: transparent;
+  background-image: linear-gradient(180deg, var(--bg), #071018);
+}
+
+/* --------------------------------------------------
+   Mobile-only composer fix (minimal, non-invasive)
+   - Pins the composer to the viewport bottom on narrow screens
+   - Respects safe-area insets so it won't overlap the iPhone home indicator
+   - Adds extra bottom padding to messages so content isn't hidden
+   This is intentionally scoped to small screens only and does not change
+   any of your existing desktop styling or layout rules.
+   -------------------------------------------------- */
+@media (max-width: 900px) {
+  .message-input-wrap {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    padding: 10px calc(12px + var(--safe-left)) calc(8px + var(--safe-bottom));
+    background: linear-gradient(180deg, rgba(7,16,24,0.6), rgba(0,0,0,0.02));
+    box-sizing: border-box;
+  }
+
+  /* Ensure messages aren't covered by the fixed composer */
+  .messages {
+    padding-bottom: calc(92px + var(--safe-bottom));
+    box-sizing: border-box;
+  }
+}
