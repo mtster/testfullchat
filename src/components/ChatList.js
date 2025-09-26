@@ -1,109 +1,113 @@
 // src/components/ChatList.js
 import React, { useEffect, useState } from "react";
-import { useAuth } from "./AuthProvider";
-import { Link, useNavigate } from "react-router-dom";
 import { rtdb } from "../firebase";
 import { ref, onValue, get } from "firebase/database";
-import NewChatModal from "./NewChatModal";
 import ChatItem from "./ChatItem";
-import "../index.css";
+import NewChatModal from "./NewChatModal";
+import { useAuth } from "./AuthProvider";
 
 export default function ChatList() {
   const { user, logout } = useAuth();
   const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showNewChat, setShowNewChat] = useState(false);
-  const navigate = useNavigate();
+  const [dbUserId, setDbUserId] = useState(null);
+  const [showNew, setShowNew] = useState(false);
 
-  // helper - robust membership check for various DB shapes
-  function isUserParticipant(chatObj = {}, userId, username) {
+  // resolve DB user key: try user.id/uid/userId, else scan /users by username/email
+  useEffect(() => {
+    let mounted = true;
+    async function resolve() {
+      if (!user) { if (mounted) setDbUserId(null); return; }
+      if (user.id || user.uid || user.userId) {
+        if (mounted) setDbUserId(user.id || user.uid || user.userId);
+        return;
+      }
+      // otherwise scan /users for matching username or email
+      try {
+        const snap = await get(ref(rtdb, `users`));
+        if (!snap.exists()) { if (mounted) setDbUserId(null); return; }
+        const all = snap.val() || {};
+        const candidateKey = Object.keys(all).find((k) => {
+          const u = all[k] || {};
+          if (user.username && u.username && u.username === user.username) return true;
+          if (user.email && u.email && u.email === user.email) return true;
+          // fallback: createdAt or other heuristics could be added
+          return false;
+        });
+        if (mounted) setDbUserId(candidateKey || null);
+      } catch (e) {
+        console.warn("resolve db user id error", e);
+        if (mounted) setDbUserId(null);
+      }
+    }
+    resolve();
+    return () => { mounted = false; };
+  }, [user]);
+
+  // helper to check membership in many DB shapes
+  function isMember(chatObj, userId, username) {
     if (!chatObj) return false;
-    const participants = chatObj.participants;
-    const participantUsernames = chatObj.participantUsernames || chatObj.participantUsernames || chatObj.participantUsername;
-
-    // 1) participants as object mapping userId -> true/metadata
+    const participants = chatObj.participants || chatObj.members || {};
+    // direct key check
     if (participants && typeof participants === "object") {
-      // check if userId appears as a key
       if (Object.prototype.hasOwnProperty.call(participants, userId)) return true;
-      // otherwise check values - sometimes participants are stored as { pushId: userId } or { pushId: { id: userId } }
+      // values might hold uid strings
       const vals = Object.values(participants);
       for (const v of vals) {
         if (!v) continue;
-        if (v === true) {
-          // could be keyed by userId, we already checked keys
-          continue;
-        }
-        // value might be userId string itself
         if (typeof v === "string" && v === userId) return true;
-        // nested object with id or uid
         if (typeof v === "object") {
-          if (v.id === userId || v.uid === userId || v.userId === userId) return true;
-          // sometimes username is stored in participant node, check that too
+          if (v.id === userId || v.uid === userId) return true;
           if (username && (v.username === username || v.displayName === username)) return true;
         }
+        if (v === true && typeof v !== "object" && typeof v !== "string") {
+          // nothing
+        }
       }
     }
-
-    // 2) participantUsernames (array or object) - check username if available
-    if (participantUsernames) {
-      if (Array.isArray(participantUsernames)) {
-        if (user && username && participantUsernames.includes(username)) return true;
-      } else if (typeof participantUsernames === "object") {
-        // object-style usernames
-        if (user && username && Object.values(participantUsernames).includes(username)) return true;
-      } else if (typeof participantUsernames === "string") {
-        if (user && username && participantUsernames === username) return true;
-      }
+    // participantUsernames checks
+    if (chatObj.participantUsernames) {
+      if (Array.isArray(chatObj.participantUsernames) && username && chatObj.participantUsernames.includes(username)) return true;
+      if (typeof chatObj.participantUsernames === "object" && username && Object.values(chatObj.participantUsernames).includes(username)) return true;
     }
-
-    // 3) createdBy could be the user's id if single-person chat
     if (chatObj.createdBy && chatObj.createdBy === userId) return true;
-
     return false;
   }
 
   useEffect(() => {
-    if (!user || !user.id) {
-      setChats([]);
-      setLoading(false);
-      return;
-    }
+    if (!dbUserId) { setChats([]); setLoading(false); return; }
 
     setLoading(true);
-    const userChatsRef = ref(rtdb, `userChats/${user.id}`);
+    const userChatsRef = ref(rtdb, `userChats/${dbUserId}`);
 
-    const unsub = onValue(userChatsRef, async (snapshot) => {
-      const val = snapshot.val() || {};
+    const unsub = onValue(userChatsRef, async (snap) => {
+      const val = snap.val() || {};
       const chatIds = Object.keys(val || {});
 
+      let results = [];
       try {
-        let results = [];
-
         if (chatIds.length > 0) {
-          // primary flow: read chats listed in userChats
-          const chatPromises = chatIds.map(async (cid) => {
-            const snap = await get(ref(rtdb, `chats/${cid}`));
-            if (!snap || !snap.exists()) return null;
-            return { id: cid, ...snap.val() };
+          const promises = chatIds.map(async (cid) => {
+            const cs = await get(ref(rtdb, `chats/${cid}`));
+            return cs && cs.exists() ? { id: cid, ...(cs.val() || {}) } : null;
           });
-          results = (await Promise.all(chatPromises)).filter(Boolean);
+          results = (await Promise.all(promises)).filter(Boolean);
         } else {
-          // fallback: query all chats and filter by participant membership
+          // fallback scan all chats
           const allSnap = await get(ref(rtdb, `chats`));
           if (allSnap && allSnap.exists()) {
             const all = allSnap.val();
-            results = Object.keys(all || {}).map((cid) => ({ id: cid, ...(all[cid] || {}) }))
-              .filter((c) => isUserParticipant(c, user.id, user.username || null));
+            results = Object.keys(all).map(k => ({ id: k, ...(all[k] || {}) }))
+              .filter(c => isMember(c, dbUserId, user && user.username ? user.username : null));
           } else {
             results = [];
           }
         }
 
-        // sort by lastMessageAt (descending)
         results.sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0));
         setChats(results);
-      } catch (err) {
-        console.error("ChatList: error fetching chats", err);
+      } catch (e) {
+        console.error("fetch chats error", e);
         setChats([]);
       } finally {
         setLoading(false);
@@ -113,57 +117,23 @@ export default function ChatList() {
     return () => {
       try { unsub(); } catch (e) {}
     };
-  }, [user]);
-
-  if (!user) return null;
+  }, [dbUserId]);
 
   return (
-    <div className="app-wrap">
-      <div className="topbar">
-        <div className="app-title">
-          <img src="/icon-192.png" alt="Protocol" style={{ width: 36, height: 36, borderRadius: 8 }} />
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <div style={{ fontSize: 18 }}>Protocol</div>
-            <div style={{ fontSize: 12, color: "var(--muted)" }}>Private. Light. Fast.</div>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button className="btn" onClick={() => setShowNewChat(true)}>New Chat</button>
-          <button className="btn secondary" onClick={() => { logout(); navigate("/"); }}>Logout</button>
-        </div>
+    <div className="chatlist-wrapper">
+      <div className="header">
+        <h3>Chats</h3>
+        <div>{user && user.username}</div>
+        <button onClick={() => setShowNew(true)}>New</button>
       </div>
 
-      <div className="layout" style={{ marginTop: 12 }}>
-        <aside className="sidebar">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ fontWeight: 700 }}>Chats</div>
-            <div style={{ color: "var(--muted)" }}>{user.username}</div>
-          </div>
-
-          <div className="chat-list">
-            {loading ? (
-              <div style={{ padding: 12, color: "var(--muted)" }}>Loading chats…</div>
-            ) : (
-              <>
-                {chats.length === 0 && <div style={{ padding: 12, color: "var(--muted)" }}>No chats yet</div>}
-                {chats.map((c) => (
-                  <ChatItem key={c.id} chat={c} />
-                ))}
-              </>
-            )}
-          </div>
-        </aside>
-
-        <main className="panel" style={{ minHeight: 420 }}>
-          {/* main chat view is displayed by router */}
-          <div style={{ color: "var(--muted)" }}>
-            Open or create a chat to start messaging.
-          </div>
-        </main>
+      <div className="chats">
+        {loading ? <div>Loading…</div> : null}
+        {!loading && chats.length === 0 ? <div>No chats</div> : null}
+        {chats.map(c => <ChatItem key={c.id} chat={c} />)}
       </div>
 
-      {showNewChat && <NewChatModal onClose={() => setShowNewChat(false)} />}
+      {showNew && <NewChatModal onClose={() => setShowNew(false)} />}
     </div>
   );
 }
