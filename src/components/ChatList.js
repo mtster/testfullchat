@@ -15,13 +15,59 @@ export default function ChatList() {
   const [showNewChat, setShowNewChat] = useState(false);
   const navigate = useNavigate();
 
+  // helper - robust membership check for various DB shapes
+  function isUserParticipant(chatObj = {}, userId, username) {
+    if (!chatObj) return false;
+    const participants = chatObj.participants;
+    const participantUsernames = chatObj.participantUsernames || chatObj.participantUsernames || chatObj.participantUsername;
+
+    // 1) participants as object mapping userId -> true/metadata
+    if (participants && typeof participants === "object") {
+      // check if userId appears as a key
+      if (Object.prototype.hasOwnProperty.call(participants, userId)) return true;
+      // otherwise check values - sometimes participants are stored as { pushId: userId } or { pushId: { id: userId } }
+      const vals = Object.values(participants);
+      for (const v of vals) {
+        if (!v) continue;
+        if (v === true) {
+          // could be keyed by userId, we already checked keys
+          continue;
+        }
+        // value might be userId string itself
+        if (typeof v === "string" && v === userId) return true;
+        // nested object with id or uid
+        if (typeof v === "object") {
+          if (v.id === userId || v.uid === userId || v.userId === userId) return true;
+          // sometimes username is stored in participant node, check that too
+          if (username && (v.username === username || v.displayName === username)) return true;
+        }
+      }
+    }
+
+    // 2) participantUsernames (array or object) - check username if available
+    if (participantUsernames) {
+      if (Array.isArray(participantUsernames)) {
+        if (user && username && participantUsernames.includes(username)) return true;
+      } else if (typeof participantUsernames === "object") {
+        // object-style usernames
+        if (user && username && Object.values(participantUsernames).includes(username)) return true;
+      } else if (typeof participantUsernames === "string") {
+        if (user && username && participantUsernames === username) return true;
+      }
+    }
+
+    // 3) createdBy could be the user's id if single-person chat
+    if (chatObj.createdBy && chatObj.createdBy === userId) return true;
+
+    return false;
+  }
+
   useEffect(() => {
-    // inside useEffect in ChatList.js
-if (!user || !user.id) {
-  setChats([]);
-  setLoading(false);
-  return;
-}
+    if (!user || !user.id) {
+      setChats([]);
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     const userChatsRef = ref(rtdb, `userChats/${user.id}`);
@@ -29,13 +75,31 @@ if (!user || !user.id) {
     const unsub = onValue(userChatsRef, async (snapshot) => {
       const val = snapshot.val() || {};
       const chatIds = Object.keys(val || {});
+
       try {
-        const chatPromises = chatIds.map(async (cid) => {
-          const snap = await get(ref(rtdb, `chats/${cid}`));
-          if (!snap || !snap.exists()) return null;
-          return { id: cid, ...snap.val() };
-        });
-        const results = (await Promise.all(chatPromises)).filter(Boolean);
+        let results = [];
+
+        if (chatIds.length > 0) {
+          // primary flow: read chats listed in userChats
+          const chatPromises = chatIds.map(async (cid) => {
+            const snap = await get(ref(rtdb, `chats/${cid}`));
+            if (!snap || !snap.exists()) return null;
+            return { id: cid, ...snap.val() };
+          });
+          results = (await Promise.all(chatPromises)).filter(Boolean);
+        } else {
+          // fallback: query all chats and filter by participant membership
+          const allSnap = await get(ref(rtdb, `chats`));
+          if (allSnap && allSnap.exists()) {
+            const all = allSnap.val();
+            results = Object.keys(all || {}).map((cid) => ({ id: cid, ...(all[cid] || {}) }))
+              .filter((c) => isUserParticipant(c, user.id, user.username || null));
+          } else {
+            results = [];
+          }
+        }
+
+        // sort by lastMessageAt (descending)
         results.sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0));
         setChats(results);
       } catch (err) {
@@ -64,9 +128,9 @@ if (!user || !user.id) {
           </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button className="btn" onClick={() => setShowNewChat(true)}>New chat</button>
-          <button className="btn logout" onClick={() => { logout(); navigate("/login"); }}>Logout</button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button className="btn" onClick={() => setShowNewChat(true)}>New Chat</button>
+          <button className="btn secondary" onClick={() => { logout(); navigate("/"); }}>Logout</button>
         </div>
       </div>
 
@@ -84,9 +148,7 @@ if (!user || !user.id) {
               <>
                 {chats.length === 0 && <div style={{ padding: 12, color: "var(--muted)" }}>No chats yet</div>}
                 {chats.map((c) => (
-                  <Link key={c.id} to={`/chats/${c.id}`} style={{ textDecoration: "none", color: "inherit" }}>
-                    <ChatItem chat={c} />
-                  </Link>
+                  <ChatItem key={c.id} chat={c} />
                 ))}
               </>
             )}
