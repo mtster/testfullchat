@@ -1,6 +1,10 @@
-// firebase-messaging-sw.js
-// Service Worker for Firebase Messaging (use exact filename at site root)
+// public/firebase-messaging-sw.js
+/* Service Worker for Firebase Messaging.
+   This file must be served from the site root as /firebase-messaging-sw.js
+   For GitHub Pages + create-react-app, put it in the public/ folder so it lands in build root.
+*/
 
+// import compat libraries
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js');
 
@@ -19,31 +23,28 @@ firebase.initializeApp(firebaseConfig);
 
 const messaging = firebase.messaging();
 
+// optional: customize notification click behavior
 messaging.onBackgroundMessage(function(payload) {
-  try {
-    const notification = payload.notification || {};
-    const title = notification.title || (payload.data && payload.data.title) || "New message";
-    const options = {
-      body: notification.body || (payload.data && payload.data.body) || "",
-      icon: notification.icon || "/icons/icon-192.png",
-      data: payload.data || {}
-    };
-    self.registration.showNotification(title, options);
-  } catch (err) {
-    console.error("onBackgroundMessage error", err);
-  }
+  // payload.notification already available for compat messaging
+  // you can show notification here if needed
+  // self.registration.showNotification(payload?.notification?.title || 'New message', {
+  //   body: payload?.notification?.body || '',
+  //   data: payload?.data || {}
+  // });
 });
 
 self.addEventListener('notificationclick', function(event) {
+  const url = (event.notification && event.notification.data && event.notification.data.url) ? event.notification.data.url : '/';
   event.notification.close();
-  const url = (event.notification.data && event.notification.data.url) ? event.notification.data.url : '/';
   event.waitUntil(
-    clients.matchAll({type: 'window', includeUncontrolled: true}).then(function(clientList) {
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {
       for (const client of clientList) {
+        // focus existing tab
         if (client.url === url && 'focus' in client) {
           return client.focus();
         }
       }
+      // otherwise open a new window/tab
       if (clients.openWindow) {
         return clients.openWindow(url);
       }
