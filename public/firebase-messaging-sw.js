@@ -23,14 +23,32 @@ firebase.initializeApp(firebaseConfig);
 
 const messaging = firebase.messaging();
 
-// optional: customize notification click behavior
+// Show a notification for background messages (if payload contains notification or data)
 messaging.onBackgroundMessage(function(payload) {
-  // payload.notification already available for compat messaging
-  // you can show notification here if needed
-  // self.registration.showNotification(payload?.notification?.title || 'New message', {
-  //   body: payload?.notification?.body || '',
-  //   data: payload?.data || {}
-  // });
+  try {
+    const notification = payload.notification || {};
+    const data = payload.data || {};
+    const title = notification.title || data.title || 'New message';
+    const body = notification.body || data.body || '';
+    const icon = notification.icon || '/icon-192.png';
+    const clickUrl = data.click_action || data.url || '/';
+
+    const options = {
+      body,
+      icon,
+      data: {
+        url: clickUrl,
+        // copy whole data just in case
+        payloadData: data
+      }
+    };
+
+    // show notification
+    self.registration.showNotification(title, options);
+  } catch (e) {
+    // fail silently in SW but log to console for debugging
+    console.error('[SW] onBackgroundMessage error', e);
+  }
 });
 
 self.addEventListener('notificationclick', function(event) {
@@ -39,10 +57,12 @@ self.addEventListener('notificationclick', function(event) {
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {
       for (const client of clientList) {
-        // focus existing tab
-        if (client.url === url && 'focus' in client) {
-          return client.focus();
-        }
+        // focus existing tab if URL matches
+        try {
+          if (client.url === url && 'focus' in client) {
+            return client.focus();
+          }
+        } catch (e) { /* ignore */ }
       }
       // otherwise open a new window/tab
       if (clients.openWindow) {
