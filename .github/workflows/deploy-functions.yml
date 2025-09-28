@@ -1,0 +1,50 @@
+name: Deploy Firebase Functions
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'functions/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy-functions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Authenticate to Google Cloud using Service Account
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
+
+      - name: Ensure npm install uses legacy peer deps (optional)
+        run: npm config set legacy-peer-deps true
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools@latest
+
+      - name: Write service account to file (for Firebase CLI to pick up)
+        run: echo "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}" > "${{ runner.temp }}/gcloud_key.json"
+
+      - name: Set GOOGLE_APPLICATION_CREDENTIALS env
+        run: echo "GOOGLE_APPLICATION_CREDENTIALS=${{ runner.temp }}/gcloud_key.json" >> $GITHUB_ENV
+
+      - name: Deploy functions to Firebase
+        env:
+          FIREBASE_PROJECT: ${{ secrets.FIREBASE_PROJECT_ID }}
+        run: |
+          # show which project we will deploy to
+          echo "Deploying functions to project: $FIREBASE_PROJECT"
+          firebase --version
+          firebase deploy --only functions --project "$FIREBASE_PROJECT"
