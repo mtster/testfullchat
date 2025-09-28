@@ -4,7 +4,6 @@ import { useAuth } from "./AuthProvider";
 import NewChatModal from "./NewChatModal";
 import { useNavigate } from "react-router-dom";
 import { obtainFcmTokenAndSave } from "../firebase";
-import { getAuth } from "firebase/auth";
 
 /**
  * Header component with robust logo loading:
@@ -14,7 +13,7 @@ import { getAuth } from "firebase/auth";
  *
  * Keeps the previous behavior (New Chat, Logout).
  * Added: a small notification bell button to the left of New chat which requests
- * notification permission (user gesture) and saves token to RTDB via obtainFcmTokenAndSave(uid).
+ * notification permission (user gesture) and saves token to RTDB via obtainFcmTokenAndSave().
  */
 
 export default function Header() {
@@ -22,77 +21,40 @@ export default function Header() {
   const [open, setOpen] = React.useState(false);
   const navigate = useNavigate();
   const [logoSrc, setLogoSrc] = React.useState(() => {
-    // prefer process.env.PUBLIC_URL when available (CRA)
     const pub = (typeof process !== "undefined" && process.env && process.env.PUBLIC_URL) ? process.env.PUBLIC_URL : "";
     return `${pub}/icons/icon-192.png`;
   });
 
-  // If logo fails to load, attempt an alternate path (no PUBLIC_URL)
   function handleLogoError() {
-    // If current src is already a fallback, do nothing
     const current = logoSrc || "";
     if (current.endsWith("/icons/icon-192.png") && current.startsWith("/")) {
-      // already the absolute path fallback tried - set inline SVG fallback
       setLogoSrc("data:image/svg+xml;utf8," + encodeURIComponent(HEADER_SVG));
       return;
     }
-    // try absolute path (works for many GH Pages setups)
     setLogoSrc("/icons/icon-192.png");
   }
 
   // notification button state
   const [notifLoading, setNotifLoading] = React.useState(false);
 
-  // Attempt to obtain current user's uid by multiple fallbacks
-  function resolveUidFallback() {
-    // primary: user object from AuthProvider
-    if (user && (user.uid || user.id)) {
-      return user.uid || user.id;
-    }
-    // second: firebase auth currentUser
-    try {
-      const auth = getAuth();
-      if (auth && auth.currentUser && (auth.currentUser.uid || auth.currentUser.id)) {
-        return auth.currentUser.uid || auth.currentUser.id;
-      }
-    } catch (e) {
-      /* ignore */
-    }
-    // third: global fallbacks some apps use
-    if (window.currentUser && (window.currentUser.uid || window.currentUser.id)) {
-      return window.currentUser.uid || window.currentUser.id;
-    }
-    if (window.__CURRENT_USER_UID__) return window.__CURRENT_USER_UID__;
-    return null;
-  }
-
-  // Click handler for the bell; uses obtainFcmTokenAndSave(uid)
+  // Click handler for the bell; uses obtainFcmTokenAndSave() with no uid so firebase.js resolves it
   async function handleEnableNotifications() {
     if (notifLoading) return;
     setNotifLoading(true);
     try {
-      const uid = resolveUidFallback();
-      if (!uid) {
-        // don't change UI - minimal friendly prompt
-        alert("Please sign in first to enable notifications.");
-        setNotifLoading(false);
-        return;
-      }
-
-      const token = await obtainFcmTokenAndSave(uid);
+      // call obtainFcmTokenAndSave without uid; the function will try firebase auth and fallbacks
+      const token = await obtainFcmTokenAndSave();
       if (token) {
-        // success feedback (minimal)
         alert("Notifications enabled.");
       } else {
-        // show likely reason
         const perm = (typeof Notification !== "undefined" && Notification.permission) ? Notification.permission : "unknown";
-        alert("Could not enable notifications. Permission status: " + perm + ". Make sure the app is installed to Home Screen and try again.");
+        console.warn('[Header] obtainFcmTokenAndSave returned no token. Notification.permission=', perm);
+        alert("Could not enable notifications. Permission: " + perm + ". Make sure the app is installed to Home Screen and try again.");
       }
     } catch (err) {
       console.error("enable notifications error", err);
       alert("Failed to enable notifications. Check console for details.");
     } finally {
-      // small debounce
       setTimeout(() => setNotifLoading(false), 600);
     }
   }
@@ -113,7 +75,7 @@ export default function Header() {
       </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        {/* Notification bell inserted left of New chat (minimal styling, uses .btn for visual parity) */}
+        {/* Notification bell inserted left of New chat */}
         <button
           className="btn"
           onClick={handleEnableNotifications}
