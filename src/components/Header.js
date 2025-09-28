@@ -3,6 +3,8 @@ import React from "react";
 import { useAuth } from "./AuthProvider";
 import NewChatModal from "./NewChatModal";
 import { useNavigate } from "react-router-dom";
+import { obtainFcmTokenAndSave } from "../firebase";
+import { getAuth } from "firebase/auth";
 
 /**
  * Header component with robust logo loading:
@@ -11,7 +13,10 @@ import { useNavigate } from "react-router-dom";
  * - uses an inline SVG fallback if the image can't be loaded
  *
  * Keeps the previous behavior (New Chat, Logout).
+ * Added: a small notification bell button to the left of New chat which requests
+ * notification permission (user gesture) and saves token to RTDB via obtainFcmTokenAndSave(uid).
  */
+
 export default function Header() {
   const { user, logout } = useAuth();
   const [open, setOpen] = React.useState(false);
@@ -35,6 +40,63 @@ export default function Header() {
     setLogoSrc("/icons/icon-192.png");
   }
 
+  // notification button state
+  const [notifLoading, setNotifLoading] = React.useState(false);
+
+  // Attempt to obtain current user's uid by multiple fallbacks
+  function resolveUidFallback() {
+    // primary: user object from AuthProvider
+    if (user && (user.uid || user.id)) {
+      return user.uid || user.id;
+    }
+    // second: firebase auth currentUser
+    try {
+      const auth = getAuth();
+      if (auth && auth.currentUser && (auth.currentUser.uid || auth.currentUser.id)) {
+        return auth.currentUser.uid || auth.currentUser.id;
+      }
+    } catch (e) {
+      /* ignore */
+    }
+    // third: global fallbacks some apps use
+    if (window.currentUser && (window.currentUser.uid || window.currentUser.id)) {
+      return window.currentUser.uid || window.currentUser.id;
+    }
+    if (window.__CURRENT_USER_UID__) return window.__CURRENT_USER_UID__;
+    return null;
+  }
+
+  // Click handler for the bell; uses obtainFcmTokenAndSave(uid)
+  async function handleEnableNotifications() {
+    if (notifLoading) return;
+    setNotifLoading(true);
+    try {
+      const uid = resolveUidFallback();
+      if (!uid) {
+        // don't change UI - minimal friendly prompt
+        alert("Please sign in first to enable notifications.");
+        setNotifLoading(false);
+        return;
+      }
+
+      const token = await obtainFcmTokenAndSave(uid);
+      if (token) {
+        // success feedback (minimal)
+        alert("Notifications enabled.");
+      } else {
+        // show likely reason
+        const perm = (typeof Notification !== "undefined" && Notification.permission) ? Notification.permission : "unknown";
+        alert("Could not enable notifications. Permission status: " + perm + ". Make sure the app is installed to Home Screen and try again.");
+      }
+    } catch (err) {
+      console.error("enable notifications error", err);
+      alert("Failed to enable notifications. Check console for details.");
+    } finally {
+      // small debounce
+      setTimeout(() => setNotifLoading(false), 600);
+    }
+  }
+
   return (
     <div className="topbar" role="banner" aria-label="Top bar">
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -51,7 +113,23 @@ export default function Header() {
       </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        {/* Notification bell inserted left of New chat (minimal styling, uses .btn for visual parity) */}
+        <button
+          className="btn"
+          onClick={handleEnableNotifications}
+          disabled={notifLoading}
+          title="Enable notifications"
+          aria-label="Enable notifications"
+          style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "6px 8px" }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 22c1.1 0 1.99-.9 1.99-2H10c0 1.1.9 2 2 2z" fill="currentColor" />
+            <path d="M18 16v-5c0-3.07-1.63-5.64-4.5-6.32V4a1.5 1.5 0 10-3 0v.68C7.63 5.36 6 7.92 6 11v5l-1.99 2H20L18 16z" fill="currentColor" />
+          </svg>
+        </button>
+
         <button className="btn" onClick={() => setOpen(true)}>New chat</button>
+
         <button
           className="btn logout"
           onClick={() => {
