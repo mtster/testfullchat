@@ -1,5 +1,9 @@
 import './index.css';
 
+// add this line near the top of src/index.js
+import "./notificationsBellInjector";
+
+
 
 
 
