@@ -4,8 +4,8 @@ import { getDatabase, ref, set } from "firebase/database";
 import { getMessaging, getToken, isSupported, onMessage } from "firebase/messaging";
 
 /**
- * Replace the firebaseConfig below with the same object your app uses.
- * I left your values here (from what you previously pasted) — keep them or replace if needed.
+ * Keep / replace this firebaseConfig with the one your app uses.
+ * I included the config values you previously posted.
  */
 const firebaseConfig = {
   apiKey: "AIzaSyA-FwUy8WLXiYtT46F0f59gr461cEI_zmo",
@@ -20,7 +20,7 @@ const firebaseConfig = {
 export const app = initializeApp(firebaseConfig);
 export const rtdb = getDatabase(app);
 
-/** Helper - register the SW at root /firebase-messaging-sw.js */
+/** Register SW at root /firebase-messaging-sw.js */
 async function registerMessagingSW() {
   if (typeof window === "undefined" || !("serviceWorker" in navigator)) return null;
   try {
@@ -33,7 +33,7 @@ async function registerMessagingSW() {
   }
 }
 
-/** Internal helper to get the VAPID key set at build time (or window fallback). */
+/** Get VAPID key from build-time env or window fallback */
 function getVapidKey() {
   if (typeof window !== 'undefined' && window.__REACT_APP_FIREBASE_VAPID_KEY) {
     return window.__REACT_APP_FIREBASE_VAPID_KEY;
@@ -46,9 +46,8 @@ function getVapidKey() {
 
 /**
  * obtainFcmToken()
- * - Attempts to obtain an FCM token and returns it (does NOT write to DB).
- * - Returns token string or null.
- * Use this when you only want the token value (no DB write).
+ * - Returns a token string or null.
+ * - Does NOT request permission. Caller should ensure Notification.permission === 'granted'
  */
 export async function obtainFcmToken() {
   try {
@@ -57,8 +56,6 @@ export async function obtainFcmToken() {
       return null;
     }
 
-    // If permission is 'default' we *do not* automatically request here — caller may want to trigger
-    // request in a user gesture. But if permission is 'granted' proceed.
     if (Notification.permission !== 'granted') {
       console.warn('[FCM] Notification.permission !== "granted" (value: ' + Notification.permission + ')');
       return null;
@@ -70,7 +67,6 @@ export async function obtainFcmToken() {
       return null;
     }
 
-    // Best effort: register SW if possible
     const swReg = await registerMessagingSW();
 
     const messaging = getMessaging();
@@ -94,11 +90,7 @@ export async function obtainFcmToken() {
 
 /**
  * obtainFcmTokenAndSave(uid)
- * - Requests Notification permission if needed (requests user permission).
- * - Obtains token and writes to RTDB at:
- *     users/{uid}/fcmTokens/{token} = true
- *     users/{uid}/lastFcmToken = token
- * - Returns token string or null.
+ * - Requests permission if default, obtains token and writes it to RTDB.
  */
 export async function obtainFcmTokenAndSave(uid) {
   if (!uid) {
@@ -112,7 +104,7 @@ export async function obtainFcmTokenAndSave(uid) {
       return null;
     }
 
-    // Request permission only if default (so we don't spam prompt)
+    // Request permission only if default (so callers can trigger on a user gesture)
     if (Notification.permission === 'default') {
       try {
         await Notification.requestPermission();
@@ -147,7 +139,6 @@ export async function obtainFcmTokenAndSave(uid) {
     }
 
     try {
-      // write the token presence to RTDB
       await set(ref(rtdb, `users/${uid}/fcmTokens/${token}`), true);
       await set(ref(rtdb, `users/${uid}/lastFcmToken`), token);
     } catch (dbErr) {
@@ -166,7 +157,6 @@ export async function obtainFcmTokenAndSave(uid) {
 export async function removeFcmToken(uid, token) {
   if (!uid || !token) return;
   try {
-    // set to null to remove
     await set(ref(rtdb, `users/${uid}/fcmTokens/${token}`), null);
     console.log('[FCM] removed token for uid', uid);
   } catch (e) {
@@ -174,7 +164,10 @@ export async function removeFcmToken(uid, token) {
   }
 }
 
-/** setupOnMessage(cb) - registers onMessage to receive payloads while page is foreground */
+/**
+ * setupOnMessage(cb)
+ * - Register onMessage to receive payloads while page is foreground
+ */
 export function setupOnMessage(onMessageCallback) {
   isSupported().then(supported => {
     if (!supported) return;
@@ -191,3 +184,9 @@ export function setupOnMessage(onMessageCallback) {
     console.warn('[FCM] isSupported() failed', e && e.message ? e.message : e);
   });
 }
+
+/**
+ * onForegroundMessage(payloadCallback)
+ * - Compatibility export: same as setupOnMessage
+ */
+export const onForegroundMessage = (cb) => setupOnMessage(cb);
