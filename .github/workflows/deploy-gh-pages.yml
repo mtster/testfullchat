@@ -25,6 +25,9 @@ jobs:
         run: npm install
 
       - name: Build production bundle
+        # Ensure REACT_APP_FIREBASE_VAPID_KEY is available to the build
+        env:
+          REACT_APP_FIREBASE_VAPID_KEY: ${{ secrets.REACT_APP_FIREBASE_VAPID_KEY }}
         run: npm run build
 
       - name: Deploy to gh-pages branch
