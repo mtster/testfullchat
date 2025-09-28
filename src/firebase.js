@@ -1,6 +1,6 @@
 // src/firebase.js
 import { initializeApp } from "firebase/app";
-import { getDatabase, ref, set, push, serverTimestamp } from "firebase/database";
+import { getDatabase, ref, set, push } from "firebase/database";
 import { getMessaging, getToken, isSupported, onMessage } from "firebase/messaging";
 import { getAuth } from "firebase/auth";
 
@@ -20,22 +20,76 @@ const firebaseConfig = {
 export const app = initializeApp(firebaseConfig);
 export const rtdb = getDatabase(app);
 
-/** Helper - register the SW at root /firebase-messaging-sw.js */
+/** Compute a safe base path for the project page. */
+function computeSiteBasePath() {
+  // 1) If PUBLIC_URL is provided at build time, use it (CRA behavior)
+  if (typeof process !== "undefined" && process.env && process.env.PUBLIC_URL) {
+    // PUBLIC_URL might be absolute or relative. Normalize to path part only.
+    try {
+      const u = new URL(process.env.PUBLIC_URL, window.location.href);
+      return u.pathname.replace(/\/$/, "");
+    } catch (e) {
+      // fallback to raw PUBLIC_URL
+      return String(process.env.PUBLIC_URL).replace(/\/$/, "");
+    }
+  }
+
+  // 2) If running as username.github.io (no repo), base is empty string
+  // If running as username.github.io/reponame/..., base is '/reponame'
+  if (typeof window !== "undefined" && window.location && window.location.pathname) {
+    const parts = window.location.pathname.split("/").filter(Boolean);
+    if (parts.length === 0) return "";
+    // If site is hosted under gh-pages as a project page, the repo name is the first segment.
+    // Use that as the base (e.g. '/reponame').
+    return `/${parts[0]}`;
+  }
+
+  return "";
+}
+
+/** Build the SW URL we should register. */
+function computeSwUrl() {
+  try {
+    const basePath = computeSiteBasePath(); // like '' or '/reponame'
+    const origin = (typeof window !== "undefined" && window.location && window.location.origin) ? window.location.origin : "";
+    // sw should be placed at: origin + basePath + '/firebase-messaging-sw.js'
+    return `${origin}${basePath}/firebase-messaging-sw.js`;
+  } catch (e) {
+    return "/firebase-messaging-sw.js";
+  }
+}
+
+/** Robust service worker registration using computed path & scope */
 async function registerMessagingSW() {
   if (typeof window === "undefined" || !("serviceWorker" in navigator)) {
-    return { ok: false, reason: "no-service-worker-support" };
+    return { ok: false, reason: "no-service-worker-support", swUrl: null };
   }
+
+  const swUrl = computeSwUrl();
+  const scope = (function () {
+    // scope must match basePath (or root '/')
+    const basePath = computeSiteBasePath();
+    return basePath ? `${basePath}/` : "/";
+  })();
+
   try {
-    // try to get an existing registration first
-    const existing = await navigator.serviceWorker.getRegistration();
-    if (existing) {
-      return { ok: true, registration: existing, used: "existing" };
+    // Try existing registration first but prefer registrations that match our expected scope
+    const registrations = await navigator.serviceWorker.getRegistrations().catch(() => []);
+    for (const reg of registrations || []) {
+      try {
+        if (reg && reg.scope && reg.scope.endsWith(scope)) {
+          return { ok: true, registration: reg, used: "existing-matching-scope", swUrl, scope };
+        }
+      } catch (e) { /* ignore */ }
     }
-    // otherwise register
-    const reg = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' });
-    return { ok: true, registration: reg, used: "registered" };
+
+    // Try to register at computed swUrl with the computed scope
+    const reg = await navigator.serviceWorker.register(swUrl, { scope });
+    return { ok: true, registration: reg, used: "registered", swUrl, scope };
   } catch (err) {
-    return { ok: false, reason: (err && err.message) ? err.message : String(err) };
+    // Return the attempted SW URL and the error reason for debugging
+    const reason = (err && err.message) ? err.message : String(err);
+    return { ok: false, reason, swUrl, scope };
   }
 }
 
@@ -54,10 +108,7 @@ function getVapidKey() {
 async function writeDebug(uid, payload) {
   try {
     if (!uid) return;
-    const base = ref(rtdb, `users/${uid}/fcmDebug`);
-    // lastAttempt (easy to inspect)
     await set(ref(rtdb, `users/${uid}/fcmDebug/lastAttempt`), payload);
-    // pushes a detailed attempt (history)
     await push(ref(rtdb, `users/${uid}/fcmDebug/attempts`), payload);
   } catch (err) {
     // best-effort; do not throw
@@ -86,23 +137,18 @@ export async function obtainFcmToken() {
       return null;
     }
 
-    // Ensure SW is registered
+    // Register SW using computed project-aware URL
     const sw = await registerMessagingSW();
     if (!sw.ok) {
-      console.warn('[FCM] SW register failed:', sw.reason);
-      // continue — getToken might still work in some environments without swReg
+      console.warn('[FCM] SW register failed:', sw.reason, 'swUrl:', sw.swUrl, 'scope:', sw.scope);
+      // continue — getToken might still work without swReg on some browsers (but likely won't)
     }
 
     const messaging = getMessaging();
     const vapidKey = getVapidKey();
 
-    // We'll attempt multiple combinations to maximize chance on various browsers:
-    // 1) vapidKey + serviceWorkerRegistration
-    // 2) serviceWorkerRegistration only
-    // 3) vapidKey only
-    // 4) no options
+    // Try multiple combinations similar to previous logic
     const attempts = [];
-
     if (vapidKey && sw.ok && sw.registration) {
       attempts.push({ name: 'vapid+sw', options: { vapidKey, serviceWorkerRegistration: sw.registration } });
     }
@@ -124,11 +170,9 @@ export async function obtainFcmToken() {
           return token;
         } else {
           console.warn('[FCM] getToken returned null on', a.name);
-          // continue to next attempt
         }
       } catch (err) {
         console.warn('[FCM] getToken error on', a.name, err && err.message ? err.message : err);
-        // continue to next attempt
       }
     }
 
@@ -150,15 +194,14 @@ export async function obtainFcmToken() {
  */
 export async function obtainFcmTokenAndSave(uid) {
   const startTs = Date.now();
-  // resolve uid
+
+  // Resolve uid
   let resolvedUid = uid || null;
   if (!resolvedUid) {
     try {
       const auth = getAuth();
       if (auth && auth.currentUser && auth.currentUser.uid) resolvedUid = auth.currentUser.uid;
-    } catch (e) {
-      // ignore
-    }
+    } catch (e) {}
   }
   if (!resolvedUid && typeof window !== 'undefined') {
     if (window.__CURRENT_USER_UID__) resolvedUid = window.__CURRENT_USER_UID__;
@@ -167,7 +210,6 @@ export async function obtainFcmTokenAndSave(uid) {
     }
   }
 
-  // minimal debug object we will write
   const baseDebug = {
     ts: startTs,
     clientTime: new Date(startTs).toISOString(),
@@ -178,55 +220,42 @@ export async function obtainFcmTokenAndSave(uid) {
   };
 
   if (!resolvedUid) {
-    // write debug and return
     await writeDebug(null, { ...baseDebug, note: "no-uid-resolved" });
     console.warn('[FCM] no uid resolved for token save');
     return null;
   }
 
-  // Ensure Notification API exists
   if (typeof Notification === 'undefined') {
     const dbg = { ...baseDebug, note: 'no-notification-api' };
     await writeDebug(resolvedUid, dbg);
     return null;
   }
 
-  // Request permission if default (should be triggered inside user gesture)
+  // Request permission if default (should be triggered by a user gesture)
   if (Notification.permission === 'default') {
     try {
       await Notification.requestPermission();
     } catch (e) {
-      // capture error
       const dbg = { ...baseDebug, note: 'requestPermission-threw', error: (e && e.message) ? e.message : String(e) };
       await writeDebug(resolvedUid, dbg);
       return null;
     }
   }
 
-  // After request attempt, update permission value
   baseDebug.permission = Notification.permission;
-
-  // If not granted, write debug and exit
   if (Notification.permission !== 'granted') {
     const dbg = { ...baseDebug, note: 'permission-not-granted' };
     await writeDebug(resolvedUid, dbg);
     return null;
   }
 
-  // Now attempt to get token (obtainFcmToken tries multiple getToken options)
-  try {
-    const vapidKey = getVapidKey();
-    const swRegistrationInfo = await registerMessagingSW();
-    // record SW status
-    baseDebug.sw = { ok: swRegistrationInfo.ok, used: swRegistrationInfo.used || null, reason: swRegistrationInfo.reason || null };
-  } catch (e) {
-    baseDebug.sw = { ok: false, reason: (e && e.message) ? e.message : String(e) };
-  }
+  // Register SW and capture result
+  const swRegInfo = await registerMessagingSW();
+  baseDebug.sw = { ok: swRegInfo.ok, used: swRegInfo.used || null, reason: swRegInfo.reason || null, swUrl: swRegInfo.swUrl || null, scope: swRegInfo.scope || null };
 
-  // Try obtaining token and track each attempt in debug
+  // Try obtaining token, capturing per-attempt info
   let token = null;
   try {
-    // We'll replicate the internal attempts used by obtainFcmToken() and also capture errors per attempt
     const supported = await isSupported().catch(() => false);
     if (!supported) {
       const dbg = { ...baseDebug, note: 'messaging-not-supported' };
@@ -234,10 +263,10 @@ export async function obtainFcmTokenAndSave(uid) {
       return null;
     }
 
-    // We'll gather attempts in the debug object by reusing obtainFcmToken logic but capturing each step
     const messaging = getMessaging();
     const vapidKey = getVapidKey();
-    const swRegObj = await navigator.serviceWorker.getRegistration().catch(() => null);
+    // try to get registration from navigator (may be null)
+    const swRegObj = (await navigator.serviceWorker.getRegistration().catch(() => null)) || (swRegInfo && swRegInfo.registration ? swRegInfo.registration : null);
 
     const attemptConfigs = [];
     if (vapidKey && swRegObj) attemptConfigs.push({ name: 'vapid+sw', options: { vapidKey, serviceWorkerRegistration: swRegObj } });
@@ -270,13 +299,11 @@ export async function obtainFcmTokenAndSave(uid) {
     return null;
   }
 
-  // Write final debug and save token if obtained
   if (token) {
     try {
       await set(ref(rtdb, `users/${resolvedUid}/fcmTokens/${token}`), true);
       await set(ref(rtdb, `users/${resolvedUid}/lastFcmToken`), token);
     } catch (dbErr) {
-      // include DB error in debug
       baseDebug.dbError = (dbErr && dbErr.message) ? dbErr.message : String(dbErr);
     }
     const successDbg = { ...baseDebug, note: 'token-obtained', token, tsEnd: Date.now() };
