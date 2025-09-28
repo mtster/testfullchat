@@ -1,4 +1,3 @@
-// src/components/AuthProvider.js
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { rtdb } from "../firebase";
 import {
@@ -22,7 +21,6 @@ export function useAuth() {
 
 /**
  * Custom simple auth using Realtime Database users node.
- * This preserves the app's existing custom authentication approach.
  *
  * Data layout:
  * users/{uid} = { username, password, createdAt, ...additional fields... }
@@ -42,6 +40,17 @@ export default function AuthProvider({ children }) {
   });
   const [initializing, setInitializing] = useState(true);
 
+  // restore uid into global if present (helps notification flow)
+  try {
+    const savedUid = localStorage.getItem("CURRENT_USER_UID");
+    if (savedUid && typeof window !== "undefined") {
+      // only set if not already set
+      if (!window.__CURRENT_USER_UID__) window.__CURRENT_USER_UID__ = savedUid;
+    }
+  } catch (e) {
+    // ignore
+  }
+
   useEffect(() => {
     setInitializing(false);
   }, []);
@@ -58,7 +67,11 @@ export default function AuthProvider({ children }) {
         presenceRef = ref(rtdb, `users/${u.id}/online`);
         await set(presenceRef, true);
         disconnecter = onDisconnect(presenceRef);
-        try { await disconnecter.set(false); } catch (err) { /* best-effort */ }
+        try {
+          await disconnecter.set(false);
+        } catch (err) {
+          /* best-effort */
+        }
 
         // Obtain FCM token (if browser supports it & permission granted)
         try {
@@ -67,12 +80,17 @@ export default function AuthProvider({ children }) {
             currentFcmToken = token;
             // store token under users/{uid}/fcmTokens/{token} = true
             await set(ref(rtdb, `users/${u.id}/fcmTokens/${token}`), true);
-            // persist token in local user object (not sensitive)
+            // persist token flag in local user object (not sensitive)
             const updated = { ...u, fcmTokenSaved: true };
             setUser(updated);
             localStorage.setItem("user", JSON.stringify(updated));
+            // also ensure CURRENT_USER_UID persisted (persistUser usually handles this)
+            try {
+              if (typeof window !== "undefined") window.__CURRENT_USER_UID__ = u.id;
+              localStorage.setItem("CURRENT_USER_UID", u.id);
+            } catch (err) { /* ignore */ }
           } else {
-            // no token obtained
+            // no token obtained (likely permission not granted) - not an error
           }
         } catch (err) {
           console.warn("storing fcm token failed:", err && err.message);
@@ -85,7 +103,6 @@ export default function AuthProvider({ children }) {
             console.debug("Foreground push received (ignored for native notification):", payload);
           });
         } catch (err) { /* ignore */ }
-
       } catch (err) {
         console.warn("presence setup failed:", err && err.message);
       }
@@ -102,8 +119,7 @@ export default function AuthProvider({ children }) {
           if (user && user.id) {
             await set(ref(rtdb, `users/${user.id}/online`), false);
             await set(ref(rtdb, `users/${user.id}/activeChat`), null);
-            // remove saved FCM token (best-effort) - we don't know token value here reliably; apps often keep token list server-side.
-            // NOTE: we won't delete tokens automatically here to avoid removing tokens used on other devices.
+            // We intentionally don't remove fcmTokens here to avoid deleting tokens used on other devices.
           }
         } catch (err) { /* ignore */ }
       })();
@@ -132,10 +148,12 @@ export default function AuthProvider({ children }) {
     persistUser(u);
     setUser(u);
     // setup presence and FCM for newly created user
-    try { await (async () => {
-      const token = await obtainFcmToken();
-      if (token) await set(ref(rtdb, `users/${uid}/fcmTokens/${token}`), true);
-    })(); } catch (e) {}
+    try {
+      await (async () => {
+        const token = await obtainFcmToken();
+        if (token) await set(ref(rtdb, `users/${uid}/fcmTokens/${token}`), true);
+      })();
+    } catch (e) { /* ignore */ }
     return u;
   }
 
@@ -161,9 +179,9 @@ export default function AuthProvider({ children }) {
     try {
       if (user && user.id) {
         // set online false
-        await set(ref(rtdb, `users/${user.id}/online`), false).catch(()=>{});
-        await set(ref(rtdb, `users/${user.id}/activeChat`), null).catch(()=>{});
-        // remove fcm tokens for this device is hard without token value; instruct removeFcmToken on client if needed
+        await set(ref(rtdb, `users/${user.id}/online`), false).catch(() => { });
+        await set(ref(rtdb, `users/${user.id}/activeChat`), null).catch(() => { });
+        // remove fcm tokens for this device is hard without token value
       }
     } catch (err) {
       console.warn("logout cleanup failed:", err && err.message);
@@ -171,6 +189,13 @@ export default function AuthProvider({ children }) {
     persistUser(null);
     setUser(null);
     localStorage.removeItem("lastChat");
+    // clear global uid
+    try {
+      if (typeof window !== "undefined") {
+        window.__CURRENT_USER_UID__ = null;
+        localStorage.removeItem("CURRENT_USER_UID");
+      }
+    } catch (e) { /* ignore */ }
   }
 
   function persistUser(u) {
@@ -180,7 +205,19 @@ export default function AuthProvider({ children }) {
       } else {
         localStorage.setItem("user", JSON.stringify(u));
       }
-    } catch (e) {}
+      // also persist uid for notification flows / other integrations
+      try {
+        if (!u) {
+          if (typeof window !== "undefined") window.__CURRENT_USER_UID__ = null;
+          localStorage.removeItem("CURRENT_USER_UID");
+        } else {
+          if (typeof window !== "undefined") window.__CURRENT_USER_UID__ = u.id;
+          localStorage.setItem("CURRENT_USER_UID", u.id);
+        }
+      } catch (e) {
+        // ignore storage errors
+      }
+    } catch (e) { /* ignore */ }
   }
 
   const value = { user, register, login, logout, initializing };
