@@ -2,10 +2,11 @@
 import { initializeApp } from "firebase/app";
 import { getDatabase, ref, set } from "firebase/database";
 import { getMessaging, getToken, isSupported, onMessage } from "firebase/messaging";
+import { getAuth } from "firebase/auth";
 
 /**
- * Keep / replace this firebaseConfig with the one your app uses.
- * I included the config values you previously posted.
+ * Replace/keep this firebaseConfig with your project's config
+ * (kept the values you previously used).
  */
 const firebaseConfig = {
   apiKey: "AIzaSyA-FwUy8WLXiYtT46F0f59gr461cEI_zmo",
@@ -46,8 +47,8 @@ function getVapidKey() {
 
 /**
  * obtainFcmToken()
- * - Returns a token string or null.
- * - Does NOT request permission. Caller should ensure Notification.permission === 'granted'
+ * - Returns token string or null.
+ * - Does NOT request permission: caller must ensure Notification.permission === 'granted'
  */
 export async function obtainFcmToken() {
   try {
@@ -55,26 +56,21 @@ export async function obtainFcmToken() {
       console.warn('[FCM] Notifications not supported in this environment');
       return null;
     }
-
     if (Notification.permission !== 'granted') {
       console.warn('[FCM] Notification.permission !== "granted" (value: ' + Notification.permission + ')');
       return null;
     }
-
     const supported = await isSupported().catch(() => false);
     if (!supported) {
       console.warn('[FCM] Firebase Messaging not supported');
       return null;
     }
-
     const swReg = await registerMessagingSW();
-
     const messaging = getMessaging();
     const vapidKey = getVapidKey();
     const options = {};
     if (vapidKey) options.vapidKey = vapidKey;
     if (swReg) options.serviceWorkerRegistration = swReg;
-
     const token = await getToken(messaging, options);
     if (!token) {
       console.warn('[FCM] getToken returned null/empty');
@@ -89,22 +85,48 @@ export async function obtainFcmToken() {
 }
 
 /**
- * obtainFcmTokenAndSave(uid)
- * - Requests permission if default, obtains token and writes it to RTDB.
+ * obtainFcmTokenAndSave(uid?)
+ * - uid optional. If not provided, tries firebase auth and window fallbacks.
+ * - Requests permission if it's 'default' (so it can be invoked inside a user gesture).
+ * - Writes token to RTDB at users/{uid}/fcmTokens/{token} = true and users/{uid}/lastFcmToken = token.
+ * - Returns token string or null.
  */
 export async function obtainFcmTokenAndSave(uid) {
-  if (!uid) {
-    console.warn('[FCM] obtainFcmTokenAndSave called without uid');
-    return null;
-  }
-
   try {
-    if (typeof Notification === 'undefined') {
-      console.warn('[FCM] Notifications not supported');
+    // resolve uid if not provided
+    let resolvedUid = uid || null;
+    if (!resolvedUid) {
+      try {
+        const auth = getAuth();
+        if (auth && auth.currentUser && auth.currentUser.uid) {
+          resolvedUid = auth.currentUser.uid;
+        }
+      } catch (e) {
+        console.warn('[FCM] getAuth() failed while resolving uid', e && e.message ? e.message : e);
+      }
+    }
+    // fallback to global app exposures
+    if (!resolvedUid && typeof window !== 'undefined') {
+      if (window.currentUser && (window.currentUser.uid || window.currentUser.id)) {
+        resolvedUid = window.currentUser.uid || window.currentUser.id;
+      } else if (window.__CURRENT_USER_UID__) {
+        resolvedUid = window.__CURRENT_USER_UID__;
+      }
+    }
+
+    // If no uid found, don't fail silently — return null after explaining why
+    if (!resolvedUid) {
+      console.warn('[FCM] obtainFcmTokenAndSave: no uid provided and could not resolve current user uid. Provide uid or ensure Firebase Auth is signed in.');
       return null;
     }
 
-    // Request permission only if default (so callers can trigger on a user gesture)
+    // Ensure Notification API exists
+    if (typeof Notification === 'undefined') {
+      console.warn('[FCM] Notifications not supported in this environment');
+      return null;
+    }
+
+    // Request permission if default. This should be triggered by a user gesture.
     if (Notification.permission === 'default') {
       try {
         await Notification.requestPermission();
@@ -118,6 +140,7 @@ export async function obtainFcmTokenAndSave(uid) {
       return null;
     }
 
+    // messaging support
     const supported = await isSupported().catch(() => false);
     if (!supported) {
       console.warn('[FCM] Firebase Messaging not supported in this browser');
@@ -125,7 +148,6 @@ export async function obtainFcmTokenAndSave(uid) {
     }
 
     const swReg = await registerMessagingSW();
-
     const messaging = getMessaging();
     const vapidKey = getVapidKey();
     const options = {};
@@ -139,13 +161,14 @@ export async function obtainFcmTokenAndSave(uid) {
     }
 
     try {
-      await set(ref(rtdb, `users/${uid}/fcmTokens/${token}`), true);
-      await set(ref(rtdb, `users/${uid}/lastFcmToken`), token);
+      await set(ref(rtdb, `users/${resolvedUid}/fcmTokens/${token}`), true);
+      await set(ref(rtdb, `users/${resolvedUid}/lastFcmToken`), token);
+      console.log('[FCM] Saved token to RTDB for uid', resolvedUid);
     } catch (dbErr) {
       console.warn('[FCM] Failed to write token to RTDB', dbErr && dbErr.message ? dbErr.message : dbErr);
+      // still return token even if DB save failed
     }
 
-    console.log('[FCM] obtainFcmTokenAndSave ->', token);
     return token;
   } catch (err) {
     console.warn('[FCM] obtainFcmTokenAndSave error:', err && err.message ? err.message : err);
@@ -164,10 +187,7 @@ export async function removeFcmToken(uid, token) {
   }
 }
 
-/**
- * setupOnMessage(cb)
- * - Register onMessage to receive payloads while page is foreground
- */
+/** setupOnMessage(cb) - foreground message hook */
 export function setupOnMessage(onMessageCallback) {
   isSupported().then(supported => {
     if (!supported) return;
@@ -185,8 +205,5 @@ export function setupOnMessage(onMessageCallback) {
   });
 }
 
-/**
- * onForegroundMessage(payloadCallback)
- * - Compatibility export: same as setupOnMessage
- */
+/** onForegroundMessage alias for compatibility */
 export const onForegroundMessage = (cb) => setupOnMessage(cb);
