@@ -1,4 +1,3 @@
-// src/components/Login.js
 import React, { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "./AuthProvider";
@@ -17,7 +16,16 @@ export default function Login() {
     setErr(null);
     setLoading(true);
     try {
-      await login({ username, password });
+      // capture returned user object (AuthProvider.login returns the user)
+      const u = await login({ username, password });
+      // ensure global/local storage uid is set (AuthProvider.persistUser also does this,
+      // but we add this here as additional insurance during login flow)
+      try {
+        if (u && u.id && typeof window !== "undefined") {
+          window.__CURRENT_USER_UID__ = u.id;
+          localStorage.setItem("CURRENT_USER_UID", u.id);
+        }
+      } catch (e) { /* ignore */ }
       navigate("/", { replace: true });
     } catch (error) {
       setErr(error.message || "Failed to login.");
