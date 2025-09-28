@@ -1,129 +1,120 @@
-// src/firebase.js
+// --- paste into src/firebase.js (or your firebase util) ---
 import { initializeApp } from "firebase/app";
-import { getFirestore, serverTimestamp } from "firebase/firestore";
-import { getDatabase } from "firebase/database";
+import { getDatabase, ref, set, update } from "firebase/database";
+import { getMessaging, getToken, isSupported, onMessage } from "firebase/messaging";
 
-/**
- * Firebase config - reuse your existing values (the repo already had these).
- * Keep the same config as in your project.
- */
 const firebaseConfig = {
-  apiKey: "AIzaSyA-FwUy8WLXiYtT46F0f59gr461cEI_zmo",
-  authDomain: "protocol-chat-b6120.firebaseapp.com",
-  databaseURL: "https://protocol-chat-b6120-default-rtdb.europe-west1.firebasedatabase.app",
-  projectId: "protocol-chat-b6120",
-  storageBucket: "protocol-chat-b6120.appspot.com",
-  messagingSenderId: "969101904718",
-  appId: "1:969101904718:web:8dcd0bc8690649235cec1f"
+  // your config
 };
+export const app = initializeApp(firebaseConfig);
+export const rtdb = getDatabase(app);
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-const rtdb = getDatabase(app);
-const serverTs = serverTimestamp();
-
-/**
- * VAPID public key for FCM web push.
- * Put your public VAPID key here or set it through REACT_APP_FIREBASE_VAPID_KEY.
- *
- * On GitHub Pages (no secure env injection), the easiest path is to set it in index.html:
- * <script>window.__REACT_APP_FIREBASE_VAPID_KEY = "YOUR_VAPID_KEY_HERE";</script>
- */
-const VAPID_KEY = (typeof process !== 'undefined' && process.env && process.env.REACT_APP_FIREBASE_VAPID_KEY)
-  ? process.env.REACT_APP_FIREBASE_VAPID_KEY
-  : (typeof window !== 'undefined' && window.__REACT_APP_FIREBASE_VAPID_KEY) || 'YOUR_VAPID_KEY_HERE';
-
-/**
- * Compute service worker URL relative to PUBLIC_URL / base path.
- * This makes registration work on GitHub Pages repos served from a path.
- */
-function getServiceWorkerURL() {
+// Helper to register the SW (ensures path at root)
+async function registerMessagingSW() {
+  if (!('serviceWorker' in navigator)) return null;
   try {
-    const base = (typeof process !== 'undefined' && process.env && process.env.PUBLIC_URL)
-      ? process.env.PUBLIC_URL
-      : (typeof window !== 'undefined' && window.PUBLIC_URL ? window.PUBLIC_URL : "");
-    return (base ? base.replace(/\/$/,'') : '') + '/firebase-messaging-sw.js';
-  } catch (e) {
-    return '/firebase-messaging-sw.js';
-  }
-}
-
-/**
- * Try to obtain an FCM token for this browser. Uses dynamic import so it won't crash unsupported browsers (e.g. older Safari).
- * Returns the token string or null.
- */
-export async function obtainFcmToken() {
-  if (typeof window === 'undefined' || !('Notification' in window)) return null;
-  if (Notification.permission === 'denied') return null;
-  try {
-    const messagingModule = await import('firebase/messaging');
-    const { getMessaging, getToken } = messagingModule;
-    // register service worker if available
-    let registration = null;
-    try {
-      if ('serviceWorker' in navigator) {
-        registration = await navigator.serviceWorker.register(getServiceWorkerURL());
-      }
-    } catch (err) {
-      // registration failed but we still try without it
-      registration = null;
-    }
-    const messaging = getMessaging(app);
-    const options = {};
-    if (VAPID_KEY && VAPID_KEY !== 'YOUR_VAPID_KEY_HERE') options.vapidKey = VAPID_KEY;
-    if (registration) options.serviceWorkerRegistration = registration;
-    const token = await getToken(messaging, options);
-    if (!token) return null;
-    return token;
+    // Ensure the file exists at /firebase-messaging-sw.js
+    const reg = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' });
+    console.log('[FCM] Service Worker registered:', reg.scope);
+    return reg;
   } catch (err) {
-    // expected in unsupported browsers — log but don't throw
-    console.warn('obtainFcmToken: messaging getToken failed or unsupported:', err && err.message ? err.message : err);
+    console.warn('[FCM] SW register failed', err);
     return null;
   }
 }
 
 /**
- * Remove FCM token (best-effort).
+ * Obtain an FCM token and save it under users/{uid}/fcmTokens/{token} = true
+ * Also saves users/{uid}/lastFcmToken = token (for quick debug/inspection)
+ * Returns the token or null.
  */
-export async function removeFcmToken() {
-  if (typeof window === 'undefined') return;
+export async function obtainFcmTokenAndSave(uid) {
+  if (!uid) throw new Error('uid required');
+
+  // Check Notification permission
+  if (typeof Notification === 'undefined') {
+    console.warn('[FCM] Notifications not supported in this browser');
+    return null;
+  }
+
+  // Request notification permission (will show permission prompt)
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') {
+    console.warn('[FCM] Notification permission not granted:', permission);
+    return null;
+  }
+
+  // Ensure browser supports messaging APIs
+  const supported = await isSupported().catch(() => false);
+  if (!supported) {
+    console.warn('[FCM] Firebase Messaging not supported in this browser');
+    return null;
+  }
+
+  // Ensure VAPID key is available
+  const vapidKey = (typeof window !== 'undefined' && window.__REACT_APP_FIREBASE_VAPID_KEY) || process.env.REACT_APP_FIREBASE_VAPID_KEY;
+  if (!vapidKey) {
+    console.warn('[FCM] VAPID key missing. Add public key to window.__REACT_APP_FIREBASE_VAPID_KEY or env REACT_APP_FIREBASE_VAPID_KEY');
+    // still try — may fail
+  }
+
+  // Register the SW
+  const swReg = await registerMessagingSW();
+  if (!swReg) {
+    console.warn('[FCM] SW registration failed — token may not be obtained');
+    return null;
+  }
+
   try {
-    const messagingModule = await import('firebase/messaging');
-    const { getMessaging, deleteToken } = messagingModule;
-    const messaging = getMessaging(app);
-    try {
-      await deleteToken(messaging);
-    } catch (err) {
-      // ignore
+    const messaging = getMessaging(); // modular import above
+    const token = await getToken(messaging, {
+      vapidKey: vapidKey,
+      serviceWorkerRegistration: swReg
+    });
+
+    if (!token) {
+      console.warn('[FCM] getToken returned null/empty');
+      return null;
     }
+
+    // Save token to RTDB at users/{uid}/fcmTokens/{token} = true
+    // And save lastFcmToken for quick UI debug
+    const userTokensRef = ref(rtdb, `users/${uid}/fcmTokens/${token}`);
+    await set(userTokensRef, true);
+    const lastTokenRef = ref(rtdb, `users/${uid}/lastFcmToken`);
+    await set(lastTokenRef, token);
+
+    console.log('[FCM] Obtained token and saved to RTDB:', token);
+    return token;
   } catch (err) {
-    // ignore - not supported environment
+    console.error('[FCM] error obtaining token', err);
+    return null;
   }
 }
 
-/**
- * Handle foreground messages (in-app). Pass a handler(payload) that receives the message payload.
- * Returns a function that unsubscribes (best-effort). If messaging not supported, returns a no-op.
- */
-export function onForegroundMessage(handler) {
+// Optional: remove a token from DB when logout/uninstall
+export async function removeFcmToken(uid, token) {
+  if (!uid || !token) return;
+  const tokenRef = ref(rtdb, `users/${uid}/fcmTokens/${token}`);
   try {
-    if (typeof window === 'undefined') return () => {};
-    let unsub = null;
-    import('firebase/messaging').then((messagingModule) => {
-      try {
-        const { getMessaging, onMessage } = messagingModule;
-        const messaging = getMessaging(app);
-        unsub = onMessage(messaging, (payload) => {
-          try { handler(payload); } catch (e) {}
-        });
-      } catch (e) { /* ignore */ }
-    }).catch(() => { /* ignore */ });
-    return () => {
-      try { if (typeof unsub === 'function') unsub(); } catch (e) {}
-    };
-  } catch (err) {
-    return () => {};
+    await set(tokenRef, null);
+  } catch (e) {
+    console.warn('[FCM] could not remove token', e);
   }
 }
 
-export { app, db, rtdb, serverTs as serverTimestamp };
+// Listen for foreground messages (in-app)
+export function setupOnMessage(onMessageCallback) {
+  isSupported().then(supported => {
+    if (!supported) return;
+    try {
+      const messaging = getMessaging();
+      onMessage(messaging, payload => {
+        console.log('[FCM] onMessage payload:', payload);
+        if (typeof onMessageCallback === 'function') onMessageCallback(payload);
+      });
+    } catch (e) {
+      console.warn('[FCM] onMessage setup failed', e);
+    }
+  });
+}
