@@ -18,10 +18,10 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node.js (use Node 20 for firebase-tools compatibility)
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20.x'
 
       - name: Authenticate to Google Cloud using Service Account
         uses: google-github-actions/auth@v1
@@ -39,6 +39,13 @@ jobs:
 
       - name: Set GOOGLE_APPLICATION_CREDENTIALS env
         run: echo "GOOGLE_APPLICATION_CREDENTIALS=${{ runner.temp }}/gcloud_key.json" >> $GITHUB_ENV
+
+      - name: Install functions dependencies (if functions/ exists)
+        if: ${{ always() && (exists('functions/package.json') || false) }}
+        working-directory: ./functions
+        run: |
+          # Install exact dependencies for functions before deploying
+          npm ci
 
       - name: Deploy functions to Firebase
         env:
