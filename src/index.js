@@ -1,14 +1,12 @@
+// src/index.js
+
+// keep your index.css import (you added this)
 import './index.css';
 
-// add this line near the top of src/index.js
+// keep your notifications injector import near the top
 import "./notificationsBellInjector";
 
-
-
-
-
-
-// src/index.js
+// rest of your original index (kept logic + styles import)
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { HashRouter } from "react-router-dom";
