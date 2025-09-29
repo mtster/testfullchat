@@ -1,53 +1,55 @@
 // functions/index.js
-const functions = require("firebase-functions");
-const admin = require("firebase-admin");
+// Copy this entire file to your repository at: /functions/index.js
+// Then commit & push. Your CI (deploy-functions.yml) will deploy it.
 
-// Initialize admin SDK robustly
+const functions = require('firebase-functions');
+const admin = require('firebase-admin');
+
+// Robust admin init: use FIREBASE_SERVICE_ACCOUNT env in CI if present,
+// otherwise fallback to default credentials (firebase deploy).
 function initAdmin() {
   if (admin.apps && admin.apps.length) return admin;
   try {
     if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-      const json = typeof process.env.FIREBASE_SERVICE_ACCOUNT === "string"
+      const json = typeof process.env.FIREBASE_SERVICE_ACCOUNT === 'string'
         ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
         : process.env.FIREBASE_SERVICE_ACCOUNT;
       admin.initializeApp({
         credential: admin.credential.cert(json),
         databaseURL: process.env.FIREBASE_DATABASE_URL || `https://${json.project_id}.firebaseio.com`
       });
-      console.log("[functions] admin initialized from FIREBASE_SERVICE_ACCOUNT");
+      console.log('[functions] admin initialized from FIREBASE_SERVICE_ACCOUNT');
       return admin;
     }
   } catch (e) {
-    console.warn("[functions] FIREBASE_SERVICE_ACCOUNT parse failed, falling back:", e && e.message ? e.message : e);
+    console.warn('[functions] FIREBASE_SERVICE_ACCOUNT parse failed, falling back:', e && e.message ? e.message : e);
   }
   try {
     admin.initializeApp();
-    console.log("[functions] admin.initializeApp() OK (default credentials)");
+    console.log('[functions] admin.initializeApp() OK (default credentials)');
   } catch (e) {
-    console.warn("[functions] admin.initializeApp() fallback/ignored:", e && e.message ? e.message : e);
+    console.warn('[functions] admin.initializeApp() fallback/ignored:', e && e.message ? e.message : e);
   }
   return admin;
 }
-
 initAdmin();
 
-/** Helper: push a function invocation log visible in RTDB (easier to inspect from mobile) */
+/** --- Helpers --- **/
+
 async function writeFunctionLog(entry) {
   try {
     const db = admin.database();
     const ref = db.ref(`functionsLogs/sendMessageNotifications`).push();
     const key = ref.key;
     await ref.set({ ts: Date.now(), ...entry });
-    // also set lastInvocation for quick lookup
     await db.ref(`functionsLogs/sendMessageNotifications/last`).set({ key, ts: Date.now(), summary: entry });
     return key;
   } catch (e) {
-    console.warn("[functions] writeFunctionLog failed", e && e.message ? e.message : e);
+    console.warn('[functions] writeFunctionLog failed', e && e.message ? e.message : e);
     return null;
   }
 }
 
-/** Helper: append a per-user sendAttempt entry under users/{uid}/fcmDebug/sendAttempts */
 async function writePerUserSendAttempt(uid, payloadSummary) {
   try {
     const db = admin.database();
@@ -55,19 +57,14 @@ async function writePerUserSendAttempt(uid, payloadSummary) {
     await ref.set({ ts: Date.now(), ...payloadSummary });
     return ref.key;
   } catch (e) {
-    console.warn("[functions] writePerUserSendAttempt failed", e && e.message ? e.message : e);
+    console.warn('[functions] writePerUserSendAttempt failed', e && e.message ? e.message : e);
     return null;
   }
 }
 
-/**
- * Trigger: onCreate /messages/{chatId}/{messageId}
- * Behavior preserved: skip sender, skip online users and users with activeChat === chatId
- * Sends multicast to tokens and removes invalid tokens; now supports participants arrays or maps,
- * writes function-level logs and per-user sendAttempt entries for mobile inspection.
- */
+/** --- DB-trigger: sendMessageNotifications --- **/
 exports.sendMessageNotifications = functions.database
-  .ref("/messages/{chatId}/{messageId}")
+  .ref('/messages/{chatId}/{messageId}')
   .onCreate(async (snap, context) => {
     const message = snap.val();
     const chatId = context.params.chatId;
@@ -76,11 +73,10 @@ exports.sendMessageNotifications = functions.database
     if (!message) return null;
 
     const senderId = message.senderId || null;
-    const senderUsername = message.senderUsername || "Someone";
+    const senderUsername = message.senderUsername || 'Someone';
     const chatName = message.chatName || `Chat ${chatId}`;
     const body = (typeof message.message === 'string' && message.message.length > 0) ? message.message : 'New message';
 
-    // We'll collect debug info to write into functionsLogs
     const invocationDebug = {
       triggeredFor: { chatId, messageId, senderId, senderUsername },
       participantsRaw: null,
@@ -94,7 +90,7 @@ exports.sendMessageNotifications = functions.database
     };
 
     try {
-      // fetch chat participants (can be array or object)
+      // fetch full chat node (we normalize participants from either array or map)
       const chatSnap = await admin.database().ref(`chats/${chatId}`).once('value');
       const chatVal = chatSnap.exists() ? chatSnap.val() : null;
       if (!chatVal) {
@@ -107,16 +103,13 @@ exports.sendMessageNotifications = functions.database
       invocationDebug.participantsRaw = participantsRaw;
       let participantsList = [];
 
-      // Normalize participants: support array or object/map
       if (!participantsRaw) {
         participantsList = [];
       } else if (Array.isArray(participantsRaw)) {
         participantsList = participantsRaw.filter(Boolean);
       } else if (typeof participantsRaw === 'object') {
-        // if it's an object with keys = uid and value = true, use keys
         participantsList = Object.keys(participantsRaw);
       } else {
-        // unexpected shape
         invocationDebug.error = 'participants-unexpected-shape';
         await writeFunctionLog(invocationDebug);
         participantsList = [];
@@ -131,12 +124,11 @@ exports.sendMessageNotifications = functions.database
       }
 
       const tokensToSend = [];
-      const tokenOwnerMap = {}; // token -> uid
+      const tokenOwnerMap = {};
 
-      // For each participant resolve whether we should send
       for (const uid of participantsList) {
         if (!uid) continue;
-        if (uid === senderId) continue; // skip sender
+        if (uid === senderId) continue;
 
         try {
           const [userSnap, activeSnap] = await Promise.all([
@@ -147,7 +139,7 @@ exports.sendMessageNotifications = functions.database
           const activeChat = activeSnap && activeSnap.exists() ? activeSnap.val() : null;
           if (!userVal) continue;
 
-          // skip if online or has this chat open
+          // skip if user is online or has this chat open
           if (userVal.online === true) continue;
           if (activeChat && String(activeChat) === String(chatId)) continue;
 
@@ -160,33 +152,26 @@ exports.sendMessageNotifications = functions.database
             }
           }
         } catch (err) {
-          console.warn("[functions] failed to process participant", uid, err && err.message ? err.message : err);
+          console.warn('[functions] failed to process participant', uid, err && err.message ? err.message : err);
         }
       }
 
       invocationDebug.tokensCollected = tokensToSend.length;
-
       if (!tokensToSend || tokensToSend.length === 0) {
         await writeFunctionLog(invocationDebug);
         return null;
       }
 
-      // dedupe tokens
       const uniqueTokens = Array.from(new Set(tokensToSend));
       invocationDebug.tokensUnique = uniqueTokens.length;
 
-      // Build payload (web-friendly)
-      const payloadNotification = {
-        title: senderUsername,
-        body: body
-      };
-
+      const payloadNotification = { title: senderUsername, body: body };
       const payloadData = {
         chatId: String(chatId),
-        messageId: String(messageId || ""),
-        senderId: String(senderId || ""),
-        chatName: String(chatName || ""),
-        click_action: "/"
+        messageId: String(messageId || ''),
+        senderId: String(senderId || ''),
+        chatName: String(chatName || ''),
+        click_action: '/'
       };
 
       const messageOptions = {
@@ -194,16 +179,16 @@ exports.sendMessageNotifications = functions.database
         notification: payloadNotification,
         data: payloadData,
         webpush: {
-          headers: { TTL: "420" },
-          fcmOptions: { link: "/" }
+          headers: { TTL: '420' },
+          fcmOptions: { link: '/' }
         }
       };
 
-      // write a pre-send function log
-      const preSendKey = await writeFunctionLog({ ...invocationDebug, note: "about-to-send", tokensPreview: uniqueTokens.slice(0,20) });
+      // pre-send log
+      const preSendKey = await writeFunctionLog({ ...invocationDebug, note: 'about-to-send', tokensPreview: uniqueTokens.slice(0, 20) });
       invocationDebug.sendAttemptKey = preSendKey;
 
-      // send multicast
+      // send
       let response = null;
       try {
         response = await admin.messaging().sendMulticast(messageOptions);
@@ -211,24 +196,14 @@ exports.sendMessageNotifications = functions.database
         invocationDebug.error = 'sendMulticast-failed';
         invocationDebug.sendError = (sendErr && sendErr.message) ? sendErr.message : String(sendErr);
         await writeFunctionLog(invocationDebug);
-
-        // record error node for quick inspection
-        try {
-          await admin.database().ref(`functionsErrors/sendMulticast`).push({ ts: Date.now(), chatId, messageId, error: invocationDebug.sendError });
-        } catch (e) { /* ignore */ }
-
+        try { await admin.database().ref(`functionsErrors/sendMulticast`).push({ ts: Date.now(), chatId, messageId, error: invocationDebug.sendError }); } catch (e) {}
         return null;
       }
 
-      // Attach response summary to invocation debug and record
-      invocationDebug.sendResponseSummary = {
-        successCount: response.successCount,
-        failureCount: response.failureCount,
-        multicast: true
-      };
-      await writeFunctionLog({ ...invocationDebug, note: "send-completed", responseSummary: invocationDebug.sendResponseSummary });
+      invocationDebug.sendResponseSummary = { successCount: response.successCount, failureCount: response.failureCount, multicast: true };
+      await writeFunctionLog({ ...invocationDebug, note: 'send-completed', responseSummary: invocationDebug.sendResponseSummary });
 
-      // For each result, write a per-user small sendAttempt entry and collect tokens to remove
+      // per-token handling and cleanup
       const toRemoveByUid = {};
       if (response && Array.isArray(response.responses)) {
         response.responses.forEach((r, idx) => {
@@ -243,19 +218,17 @@ exports.sendMessageNotifications = functions.database
             chatId,
             messageId
           };
-          // write per-user attempt (best-effort)
           if (ownerUid) {
             writePerUserSendAttempt(ownerUid, perResult).catch(() => {});
           }
-          // If r.error indicates invalid registration, schedule removal
           if (!r.success && r.error && r.error.code) {
-            const code = String(r.error.code || "");
+            const code = String(r.error.code || '');
             if (
-              code.includes("registration-token-not-registered") ||
-              code.includes("invalid-registration-token") ||
-              code.includes("messaging/registration-token-not-registered") ||
-              code.includes("messaging/invalid-registration-token") ||
-              code.includes("auth/invalid-user-token")
+              code.includes('registration-token-not-registered') ||
+              code.includes('invalid-registration-token') ||
+              code.includes('messaging/registration-token-not-registered') ||
+              code.includes('messaging/invalid-registration-token') ||
+              code.includes('auth/invalid-user-token')
             ) {
               if (ownerUid) {
                 toRemoveByUid[ownerUid] = toRemoveByUid[ownerUid] || [];
@@ -268,15 +241,13 @@ exports.sendMessageNotifications = functions.database
 
       // Remove invalid tokens
       for (const uidToRemove of Object.keys(toRemoveByUid)) {
-        const toks = toRemoveByUid[uidToRemove];
-        for (const badTok of toks) {
+        for (const badTok of toRemoveByUid[uidToRemove]) {
           try {
             await admin.database().ref(`users/${uidToRemove}/fcmTokens/${badTok}`).remove();
-            console.log("[functions] removed invalid token for uid", uidToRemove);
-            // also record removal in the user's debug
-            await writePerUserSendAttempt(uidToRemove, { ts: Date.now(), removedToken: badTok, note: "token-removed-by-server" });
+            console.log('[functions] removed invalid token for uid', uidToRemove);
+            await writePerUserSendAttempt(uidToRemove, { ts: Date.now(), removedToken: badTok, note: 'token-removed-by-server' });
           } catch (e) {
-            console.warn("[functions] failed to remove invalid token", badTok, e && e.message ? e.message : e);
+            console.warn('[functions] failed to remove invalid token', badTok, e && e.message ? e.message : e);
           }
         }
       }
@@ -284,8 +255,72 @@ exports.sendMessageNotifications = functions.database
     } catch (err) {
       invocationDebug.error = (err && err.message) ? err.message : String(err);
       await writeFunctionLog(invocationDebug);
-      console.error("[functions] sendMessageNotifications error", invocationDebug.error, err);
+      console.error('[functions] sendMessageNotifications error', invocationDebug.error, err);
     }
 
     return null;
   });
+
+/** --- HTTP helper: sendTestPush --- **/
+exports.sendTestPush = functions.https.onRequest(async (req, res) => {
+  // CORS
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') return res.status(200).send('ok');
+
+  const uid = (req.query && req.query.uid) || (req.body && req.body.uid);
+  if (!uid) return res.status(400).json({ ok: false, error: 'Missing uid param' });
+
+  try {
+    const db = admin.database();
+    const snap = await db.ref(`users/${uid}/fcmTokens`).once('value');
+    const tokensObj = snap.val() || {};
+    let tokens = Object.keys(tokensObj || {});
+    if (!tokens || tokens.length === 0) {
+      return res.status(200).json({ ok: true, message: 'No tokens for uid', tokensFound: 0 });
+    }
+
+    tokens = Array.from(new Set(tokens));
+
+    const payload = {
+      notification: { title: 'Protocol — test push', body: `Test push to ${uid}` },
+      data: { test: '1', uid: String(uid) },
+      webpush: { headers: { TTL: '420' }, fcmOptions: { link: '/' } }
+    };
+
+    const sendResponse = await admin.messaging().sendToDevice(tokens, payload);
+
+    // Write sendAttempt summary to user's debug
+    try {
+      const pushRef = db.ref(`users/${uid}/fcmDebug/sendAttempts`).push();
+      await pushRef.set({ ts: Date.now(), uid, payloadSummary: { tokensSent: tokens.length }, fullResponse: sendResponse });
+      await db.ref(`users/${uid}/fcmDebug/lastSend`).set({ ts: Date.now(), tokensSent: tokens.length, successCount: sendResponse.successCount, failureCount: sendResponse.failureCount });
+    } catch (e) {
+      console.warn('[functions] failed to write sendAttempt', e && e.message ? e.message : e);
+    }
+
+    // Remove invalid tokens
+    const removed = [];
+    if (sendResponse && Array.isArray(sendResponse.results)) {
+      sendResponse.results.forEach((r, idx) => {
+        if (r && r.error) {
+          const code = String(r.error.code || '');
+          const tok = tokens[idx];
+          if (code.includes('registration-token-not-registered') || code.includes('invalid-registration-token') || code.includes('messaging/registration-token-not-registered')) {
+            removed.push(tok);
+          }
+        }
+      });
+    }
+    for (const bad of removed) {
+      try { await admin.database().ref(`users/${uid}/fcmTokens/${bad}`).remove(); } catch (e) { /* ignore */ }
+    }
+
+    return res.status(200).json({ ok: true, tokensSent: tokens.length, removedTokens: removed, results: sendResponse && sendResponse.results ? sendResponse.results : sendResponse });
+  } catch (e) {
+    console.error('[functions] sendTestPush error', e && e.message ? e.message : e);
+    return res.status(500).json({ ok: false, error: e && e.message ? e.message : String(e) });
+  }
+});
