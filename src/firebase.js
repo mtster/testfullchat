@@ -34,6 +34,16 @@ function computeSiteBasePath() {
     }
   }
 
+  // 1b) also allow fallback if a global window var was injected
+  if (typeof window !== "undefined" && window.__PUBLIC_URL__) {
+    try {
+      const u = new URL(window.__PUBLIC_URL__, window.location.href);
+      return u.pathname.replace(/\/$/, "");
+    } catch (e) {
+      return String(window.__PUBLIC_URL__).replace(/\/$/, "");
+    }
+  }
+
   // 2) If running as username.github.io (no repo), base is empty string
   // If running as username.github.io/reponame/..., base is '/reponame'
   if (typeof window !== "undefined" && window.location && window.location.pathname) {
@@ -51,7 +61,7 @@ function computeSiteBasePath() {
 function computeSwUrl() {
   try {
     const basePath = computeSiteBasePath(); // like '' or '/reponame'
-    const origin = (typeof window !== "undefined" && window.location && window.location.origin) ? window.location.origin : "";
+    const origin = (typeof window !== 'undefined' && window.location && window.location.origin) ? window.location.origin : "";
     // sw should be placed at: origin + basePath + '/firebase-messaging-sw.js'
     return `${origin}${basePath}/firebase-messaging-sw.js`;
   } catch (e) {
@@ -164,7 +174,9 @@ export async function obtainFcmToken() {
       const a = attempts[i];
       try {
         console.log('[FCM] getToken attempt', a.name, a.options);
-        const token = await getToken(messaging, a.options);
+        // If options is an empty object, call getToken(messaging) rather than passing {}
+        const hasOpts = a.options && Object.keys(a.options).length > 0;
+        const token = hasOpts ? await getToken(messaging, a.options) : await getToken(messaging);
         if (token) {
           console.log('[FCM] getToken success on', a.name);
           return token;
@@ -278,7 +290,8 @@ export async function obtainFcmTokenAndSave(uid) {
       const cfg = attemptConfigs[i];
       const attempt = { name: cfg.name, optionsProvided: Object.keys(cfg.options || {}), result: null, error: null };
       try {
-        const t = await getToken(messaging, cfg.options);
+        const hasOpts = cfg.options && Object.keys(cfg.options).length > 0;
+        const t = hasOpts ? await getToken(messaging, cfg.options) : await getToken(messaging);
         if (t) {
           attempt.result = { token: t };
           baseDebug.attempts.push(attempt);
@@ -301,6 +314,7 @@ export async function obtainFcmTokenAndSave(uid) {
 
   if (token) {
     try {
+      // Preserve your original shape: you previously wrote `true` at the token path.
       await set(ref(rtdb, `users/${resolvedUid}/fcmTokens/${token}`), true);
       await set(ref(rtdb, `users/${resolvedUid}/lastFcmToken`), token);
     } catch (dbErr) {
@@ -320,6 +334,7 @@ export async function obtainFcmTokenAndSave(uid) {
 export async function removeFcmToken(uid, token) {
   if (!uid || !token) return;
   try {
+    // keep your original behavior (setting to null)
     await set(ref(rtdb, `users/${uid}/fcmTokens/${token}`), null);
   } catch (e) {
     console.warn('[FCM] could not remove token', e && e.message ? e.message : e);
