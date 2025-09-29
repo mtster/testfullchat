@@ -1,14 +1,14 @@
 // public/firebase-messaging-sw.js
 /* Service Worker for Firebase Messaging.
-   This file must be served from the site root as /firebase-messaging-sw.js
-   For GitHub Pages + create-react-app, put it in the public/ folder so it lands in build root.
+   This file must be served from the site root (or repo base path) as /firebase-messaging-sw.js
+   For GitHub Pages + create-react-app, place in public/ so it lands at the root of the deployed site.
 */
 
-// import compat libraries
+// Import compat libraries (v9 compatibility)
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js');
 
-// --- Replace the firebaseConfig object below with the same config used in your app (kept from your build) ---
+// --- IMPORTANT: keep this firebaseConfig identical to your app's config above ---
 const firebaseConfig = {
   apiKey: "AIzaSyA-FwUy8WLXiYtT46F0f59gr461cEI_zmo",
   authDomain: "protocol-chat-b6120.firebaseapp.com",
@@ -23,31 +23,28 @@ firebase.initializeApp(firebaseConfig);
 
 const messaging = firebase.messaging();
 
-// Handle background messages (compat)
+// Background message handler (compat)
 messaging.onBackgroundMessage(function(payload) {
   try {
-    // payload may contain notification and/or data
-    const notification = payload.notification || {};
-    const data = (payload.data && typeof payload.data === 'object') ? payload.data : {};
-    const title = notification.title || data.title || "New message";
-    const body = notification.body || data.body || "";
-    const icon = notification.icon || data.icon || '/icons/icon-192.png';
-    const url = (notification.click_action || (data && (data.url || data.click_action))) || '/';
+    // payload may contain 'notification' and/or 'data'
+    const notif = payload && payload.notification ? payload.notification : {};
+    const data = payload && payload.data ? payload.data : {};
+    const title = notif.title || data.title || "New message";
+    const body = notif.body || data.body || "";
+    const icon = notif.icon || data.icon || '/icons/icon-192.png';
+    const url = (notif.click_action || (data && (data.url || data.click_action))) || '/';
 
-    // Build options
     const options = {
-      body: body,
-      icon: icon,
+      body,
+      icon,
       data: { url, payloadData: data },
-      // tag will group notifications
-      tag: data.tag || notification.tag || 'protocol-chat'
+      tag: (data && data.tag) || (notif && notif.tag) || 'protocol-chat'
     };
 
-    // Try to show a rich notification
+    // Show the notification
     self.registration.showNotification(title, options);
   } catch (e) {
-    // Fail softly but log for debugging
-    console.error('[SW] onBackgroundMessage error', e);
+    console.error('[SW] onBackgroundMessage error', e && e.message ? e.message : e);
   }
 });
 
@@ -60,7 +57,6 @@ self.addEventListener('notificationclick', function(event) {
     }
   } catch (e) { /* ignore */ }
 
-  // Focus existing tab if possible, otherwise open new
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {
       for (const client of clientList) {
