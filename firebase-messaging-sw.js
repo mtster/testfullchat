@@ -8,7 +8,7 @@
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js');
 
-// Copy the firebaseConfig exactly as in your app:
+// --- Replace the firebaseConfig object below with the same config used in your app (kept from your build) ---
 const firebaseConfig = {
   apiKey: "AIzaSyA-FwUy8WLXiYtT46F0f59gr461cEI_zmo",
   authDomain: "protocol-chat-b6120.firebaseapp.com",
@@ -23,48 +23,53 @@ firebase.initializeApp(firebaseConfig);
 
 const messaging = firebase.messaging();
 
-// Show a notification for background messages (if payload contains notification or data)
+// Handle background messages (compat)
 messaging.onBackgroundMessage(function(payload) {
   try {
+    // payload may contain notification and/or data
     const notification = payload.notification || {};
-    const data = payload.data || {};
-    const title = notification.title || data.title || 'New message';
-    const body = notification.body || data.body || '';
-    const icon = notification.icon || '/icon-192.png';
-    const clickUrl = data.click_action || data.url || '/';
+    const data = (payload.data && typeof payload.data === 'object') ? payload.data : {};
+    const title = notification.title || data.title || "New message";
+    const body = notification.body || data.body || "";
+    const icon = notification.icon || data.icon || '/icons/icon-192.png';
+    const url = (notification.click_action || (data && (data.url || data.click_action))) || '/';
 
+    // Build options
     const options = {
-      body,
-      icon,
-      data: {
-        url: clickUrl,
-        // copy whole data just in case
-        payloadData: data
-      }
+      body: body,
+      icon: icon,
+      data: { url, payloadData: data },
+      // tag will group notifications
+      tag: data.tag || notification.tag || 'protocol-chat'
     };
 
-    // show notification
+    // Try to show a rich notification
     self.registration.showNotification(title, options);
   } catch (e) {
-    // fail silently in SW but log to console for debugging
+    // Fail softly but log for debugging
     console.error('[SW] onBackgroundMessage error', e);
   }
 });
 
 self.addEventListener('notificationclick', function(event) {
-  const url = (event.notification && event.notification.data && event.notification.data.url) ? event.notification.data.url : '/';
   event.notification.close();
+  let url = '/';
+  try {
+    if (event.notification && event.notification.data && event.notification.data.url) {
+      url = event.notification.data.url;
+    }
+  } catch (e) { /* ignore */ }
+
+  // Focus existing tab if possible, otherwise open new
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {
       for (const client of clientList) {
-        // focus existing tab if URL matches
         try {
           if (client.url === url && 'focus' in client) {
             return client.focus();
           }
         } catch (e) { /* ignore */ }
       }
-      // otherwise open a new window/tab
       if (clients.openWindow) {
         return clients.openWindow(url);
       }
